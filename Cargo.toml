@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/gvm-rools-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/clawosiris/gvm-rools"
+authors = ["Greenbone AG", "clawosiris"]
+
+[workspace.dependencies]
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+anyhow = "1"
+thiserror = "2"
+
+# Async runtime
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# Underlying library (rust-gvm workspace crates)
+gvm-client = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.2.0" }
+gvm-connection = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.2.0", features = ["ssh"] }
+gvm-gmp = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.2.0" }
+gvm-protocol = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.2.0" }
