@@ -5,8 +5,12 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
-use gvm_connection::{GvmConnection, SshAuth, SshConfig, SshConnection, UnixSocketConfig, UnixSocketConnection};
+use gvm_connection::{
+    GvmConnection, SshAuth, SshConfig, SshConnection, UnixSocketConfig, UnixSocketConnection,
+};
 use gvm_protocol::Response;
+use quick_xml::events::Event;
+use quick_xml::{Reader, Writer};
 
 #[derive(Parser, Debug)]
 #[command(name = "gvm-cli")]
@@ -28,7 +32,7 @@ struct Cli {
     #[arg(short = 'r', long, default_value_t = false)]
     raw: bool,
 
-    /// Pretty format the returned XML (MVP: not implemented; currently prints as-is)
+    /// Pretty format the returned XML
     #[arg(long, default_value_t = false)]
     pretty: bool,
 
@@ -107,7 +111,9 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
         return Ok(());
     };
 
-    let password = password.ok_or_else(|| anyhow!("--gmp-password is required when --gmp-username is set (prompting not implemented yet)"))?;
+    let password = password.ok_or_else(|| {
+        anyhow!("--gmp-password is required when --gmp-username is set (prompting not implemented yet)")
+    })?;
 
     let auth_xml = format!(
         "<authenticate><credentials><username>{}</username><password>{}</password></credentials></authenticate>",
@@ -126,19 +132,43 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
 
     if !resp.is_success() {
         let status = resp.status_code().unwrap_or(0);
-        let text = resp.status_text().unwrap_or_else(|| "<no status text>".to_string());
+        let text = resp
+            .status_text()
+            .unwrap_or_else(|| "<no status text>".to_string());
         return Err(anyhow!("authentication failed (status {status}): {text}"));
     }
 
     Ok(())
 }
 
-async fn run(cli: Cli) -> Result<i32> {
-    if cli.pretty {
-        // MVP: keep behavior but make it explicit.
-        eprintln!("warning: --pretty is not implemented yet; printing XML as-is");
+fn format_xml(xml: &[u8], pretty: bool) -> Result<String> {
+    if !pretty {
+        return Ok(String::from_utf8_lossy(xml).into_owned());
     }
 
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new_with_indent(Vec::new(), b' ', 2);
+    let mut buffer = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Eof) => break,
+            Ok(event) => writer
+                .write_event(event)
+                .context("failed to pretty-print XML response")?,
+            Err(error) => {
+                return Err(anyhow!("failed to pretty-print XML response: {error}"));
+            }
+        }
+        buffer.clear();
+    }
+
+    String::from_utf8(writer.into_inner()).context("pretty-printed XML was not valid UTF-8")
+}
+
+async fn run(cli: Cli) -> Result<i32> {
     let xml = read_xml(&cli)?.trim().to_string();
     if xml.is_empty() {
         return Err(anyhow!("no XML provided (use --xml, infile, or stdin)"));
@@ -146,7 +176,11 @@ async fn run(cli: Cli) -> Result<i32> {
 
     let mut conn: Box<dyn GvmConnection> = match cli.transport {
         Transport::Socket { path, timeout } => {
-            let timeout = if timeout < 0 { None } else { Some(std::time::Duration::from_secs(timeout as u64)) };
+            let timeout = if timeout < 0 {
+                None
+            } else {
+                Some(std::time::Duration::from_secs(timeout as u64))
+            };
             let mut cfg = UnixSocketConfig::new(path);
             if let Some(t) = timeout {
                 cfg = cfg.with_timeout(t);
@@ -160,9 +194,7 @@ async fn run(cli: Cli) -> Result<i32> {
             password,
             remote_socket,
         } => {
-            let auth = password
-                .map(SshAuth::Password)
-                .unwrap_or(SshAuth::Agent);
+            let auth = password.map(SshAuth::Password).unwrap_or(SshAuth::Agent);
             let cfg = SshConfig::new(hostname, username, auth)
                 .with_port(port)
                 .with_remote_socket(remote_socket);
@@ -194,14 +226,16 @@ async fn run(cli: Cli) -> Result<i32> {
 
     if !cli.raw && !resp.is_success() {
         let status = resp.status_code().unwrap_or(0);
-        let text = resp.status_text().unwrap_or_else(|| "<no status text>".to_string());
+        let text = resp
+            .status_text()
+            .unwrap_or_else(|| "<no status text>".to_string());
         eprintln!("server rejected command (status {status}): {text}");
         // Still print the response to stdout for debugging.
-        print!("{}", String::from_utf8_lossy(resp.as_ref()));
+        print!("{}", format_xml(resp.as_ref(), cli.pretty)?);
         return Ok(1);
     }
 
-    print!("{}", String::from_utf8_lossy(resp.as_ref()));
+    print!("{}", format_xml(resp.as_ref(), cli.pretty)?);
 
     if cli.duration {
         eprintln!("Elapsed time: {:.3} seconds", elapsed.as_secs_f64());
@@ -221,5 +255,23 @@ async fn main() {
             eprintln!("error: {err:#}");
             std::process::exit(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_xml;
+
+    #[test]
+    fn pretty_prints_xml_with_indentation() {
+        let formatted = format_xml(b"<root><child>value</child></root>", true).unwrap();
+        assert!(formatted.contains("\n  <child>value</child>\n"));
+    }
+
+    #[test]
+    fn returns_original_xml_when_not_pretty() {
+        let original = "<root><child>value</child></root>";
+        let formatted = format_xml(original.as_bytes(), false).unwrap();
+        assert_eq!(formatted, original);
     }
 }
