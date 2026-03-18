@@ -22,7 +22,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 # Underlying library (rust-gvm workspace crates)
-gvm-client = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.2.0" }
-gvm-connection = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.2.0", features = ["ssh"] }
-gvm-gmp = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.2.0" }
-gvm-protocol = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.2.0" }
+gvm-client = { git = "https://github.com/clawosiris/rust-gvm.git", branch = "main" }
+gvm-connection = { git = "https://github.com/clawosiris/rust-gvm.git", branch = "main", features = ["ssh"] }
+gvm-gmp = { git = "https://github.com/clawosiris/rust-gvm.git", branch = "main" }
+gvm-protocol = { git = "https://github.com/clawosiris/rust-gvm.git", branch = "main" }

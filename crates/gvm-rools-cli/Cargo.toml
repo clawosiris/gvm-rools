@@ -31,4 +31,4 @@ tempfile = "3"
 
 # Test server from rust-gvm
 # (Used for CLI integration tests; feature enables SSH listener for future tests)
-gvm-mock-server = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.2.0", features = ["ssh"] }
+gvm-mock-server = { git = "https://github.com/clawosiris/rust-gvm.git", branch = "main", features = ["ssh"] }
