@@ -15,13 +15,13 @@ See spec: [`spec/gvm-cli/openspec.md`](spec/gvm-cli/openspec.md)
 
 ```bash
 # Unix socket
-cargo run -p gvm-rools-cli -- socket -X '<get_version/>'
+gvm-cli socket -X '<get_version/>'
 
 # Read from file
-cargo run -p gvm-rools-cli -- socket my-command.xml
+gvm-cli socket my-command.xml
 
 # SSH (agent auth)
-cargo run -p gvm-rools-cli -- ssh --hostname 127.0.0.1 -X '<get_version/>'
+gvm-cli ssh --hostname 127.0.0.1 -X '<get_version/>'
 ```
 
 ## Security & SBOM

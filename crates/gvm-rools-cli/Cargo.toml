@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "gvm-cli"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
@@ -17,6 +21,8 @@ gvm-client.workspace = true
 gvm-connection.workspace = true
 gvm-gmp.workspace = true
 gvm-protocol.workspace = true
+libc = "0.2"
+quick-xml = "0.37"
 
 [dev-dependencies]
 assert_cmd = "2"
