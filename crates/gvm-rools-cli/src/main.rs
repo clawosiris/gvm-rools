@@ -1,6 +1,9 @@
+#![deny(unsafe_code)]
+
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use std::io::{IsTerminal, Write};
+use std::os::fd::AsFd;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -10,6 +13,7 @@ use gvm_connection::{
     GvmConnection, SshAuth, SshConfig, SshConnection, UnixSocketConfig, UnixSocketConnection,
 };
 use gvm_protocol::Response;
+use nix::sys::termios::{tcgetattr, tcsetattr, LocalFlags, SetArg};
 use quick_xml::escape::escape;
 use quick_xml::events::Event;
 use quick_xml::{Reader, Writer};
@@ -180,37 +184,19 @@ fn prompt_password_from_tty(prompt: &str) -> std::io::Result<String> {
     stderr.write_all(prompt.as_bytes())?;
     stderr.flush()?;
 
-    let fd = libc::STDIN_FILENO;
-    // SAFETY: `termios` is a plain old data struct and zero initialization is valid before
-    // passing it to `tcgetattr`, which fills the fields.
-    let mut termios = unsafe { std::mem::zeroed::<libc::termios>() };
-
-    // SAFETY: `fd` is stdin, which we already verified is a terminal, and `termios` points to
-    // valid writable memory.
-    if unsafe { libc::tcgetattr(fd, &mut termios) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    let original = termios;
-    termios.c_lflag &= !libc::ECHO;
-
-    // SAFETY: same preconditions as the previous `tcgetattr` call; the struct was initialized
-    // from the current terminal settings and is safe to pass back to libc.
-    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &termios) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
+    let mut termios = tcgetattr(stdin.as_fd())?;
+    let original = termios.clone();
+    termios.local_flags.remove(LocalFlags::ECHO);
+    tcsetattr(stdin.as_fd(), SetArg::TCSANOW, &termios)?;
 
     let mut password = String::new();
     let read_result = stdin.read_line(&mut password);
 
-    // SAFETY: restore the original terminal flags on the same valid terminal file descriptor.
-    let restore_result = unsafe { libc::tcsetattr(fd, libc::TCSANOW, &original) };
+    let restore_result = tcsetattr(stdin.as_fd(), SetArg::TCSANOW, &original);
     stderr.write_all(b"\n")?;
     stderr.flush()?;
 
-    if restore_result != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
+    restore_result?;
 
     read_result?;
     while matches!(password.chars().last(), Some('\n' | '\r')) {

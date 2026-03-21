@@ -998,7 +998,7 @@ dependencies = [
  "gvm-connection",
  "gvm-mock-server",
  "gvm-protocol",
- "libc",
+ "nix",
  "quick-xml 0.37.5",
  "tempfile",
  "tokio",
