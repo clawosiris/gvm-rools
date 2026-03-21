@@ -197,11 +197,12 @@ async fn resolve_ssh_auth(password: Option<Zeroizing<String>>) -> Result<SshAuth
     }
 
     if std::io::stdin().is_terminal() {
-        let password =
-            tokio::task::spawn_blocking(|| prompt_password_from_tty("SSH Password (leave empty for SSH agent): "))
-                .await
-                .context("SSH password prompt task failed")?
-                .context("failed to read SSH password from TTY")?;
+        let password = tokio::task::spawn_blocking(|| {
+            prompt_password_from_tty("SSH Password (leave empty for SSH agent): ")
+        })
+        .await
+        .context("SSH password prompt task failed")?
+        .context("failed to read SSH password from TTY")?;
 
         if !password.is_empty() {
             let password = Zeroizing::new(password);
@@ -389,7 +390,9 @@ mod tests {
     #[test]
     fn rejects_malformed_xml_when_pretty_printing() {
         let error = format_xml(b"<root></child>", true).unwrap_err();
-        assert!(error.to_string().contains("failed to pretty-print XML response"));
+        assert!(error
+            .to_string()
+            .contains("failed to pretty-print XML response"));
     }
 
     #[test]
