@@ -46,6 +46,36 @@ async fn gvm_cli(socket_path: &Path, global_args: &[&str]) -> Result<Output> {
     .await?
 }
 
+/// Run gvm-cli with environment variables, in a blocking thread.
+async fn gvm_cli_with_env(
+    socket_path: &Path,
+    global_args: &[&str],
+    envs: &[(&str, &str)],
+) -> Result<Output> {
+    let bin = assert_cmd::cargo::cargo_bin("gvm-cli");
+    let mut args: Vec<String> = global_args.iter().map(|s| s.to_string()).collect();
+    let envs: Vec<(String, String)> = envs
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect();
+    args.extend([
+        "socket".to_string(),
+        "--path".to_string(),
+        socket_path.to_string_lossy().to_string(),
+        "--timeout".to_string(),
+        "10".to_string(),
+    ]);
+    tokio::task::spawn_blocking(move || {
+        let mut command = std::process::Command::new(bin);
+        command.args(&args);
+        for (key, value) in envs {
+            command.env(key, value);
+        }
+        command.output().map_err(anyhow::Error::from)
+    })
+    .await?
+}
+
 /// Run gvm-cli with stdin piped, in a blocking thread.
 async fn gvm_cli_stdin(
     socket_path: &Path,
@@ -234,6 +264,29 @@ async fn test_missing_password_error() -> Result<()> {
         stderr.to_lowercase().contains("password"),
         "stderr: {stderr}"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_gmp_password_env_var() -> Result<()> {
+    let Some((server, _dir, socket_path)) = start_mock_server().await? else {
+        return Ok(());
+    };
+    let output = gvm_cli_with_env(
+        &socket_path,
+        &["--gmp-username", "admin", "-X", "<get_tasks/>"],
+        &[("GMP_PASSWORD", "admin")],
+    )
+    .await?;
+    server.shutdown().await;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("<get_tasks_response"));
     Ok(())
 }
 

@@ -36,15 +36,15 @@ struct Cli {
     xml: Option<String>,
 
     /// Return raw XML even for non-2xx responses (do not treat as error)
-    #[arg(short = 'r', long, default_value_t = false)]
+    #[arg(short = 'r', long)]
     raw: bool,
 
     /// Pretty format the returned XML
-    #[arg(long, default_value_t = false)]
+    #[arg(long)]
     pretty: bool,
 
     /// Measure command execution time
-    #[arg(long, default_value_t = false)]
+    #[arg(long)]
     duration: bool,
 
     /// File to read XML commands from (if --xml not provided)
@@ -88,7 +88,7 @@ enum Transport {
     },
 
     /// TLS transport (not yet implemented in rust-gvm)
-    Tls {},
+    Tls,
 }
 
 fn parse_secret(value: &str) -> Result<Zeroizing<String>, String> {
@@ -158,6 +158,14 @@ fn build_auth_xml(username: &str, password: &str) -> String {
     format!(
         "<authenticate><credentials><username>{username}</username><password>{password}</password></credentials></authenticate>"
     )
+}
+
+fn resolve_socket_timeout(timeout: i64) -> Option<std::time::Duration> {
+    if timeout < 0 {
+        None
+    } else {
+        Some(std::time::Duration::from_secs(timeout as u64))
+    }
 }
 
 async fn resolve_gmp_password(cli: &mut Cli) -> Result<Option<Zeroizing<String>>> {
@@ -234,7 +242,7 @@ fn prompt_password_from_tty(prompt: &str) -> std::io::Result<String> {
 
 fn format_xml(xml: &[u8], pretty: bool) -> Result<String> {
     if !pretty {
-        return Ok(String::from_utf8_lossy(xml).into_owned());
+        return String::from_utf8(xml.to_vec()).context("XML response was not valid UTF-8");
     }
 
     let mut reader = Reader::from_reader(xml);
@@ -256,7 +264,7 @@ fn format_xml(xml: &[u8], pretty: bool) -> Result<String> {
         buffer.clear();
     }
 
-    String::from_utf8(writer.into_inner()).context("pretty-printed XML was not valid UTF-8")
+    String::from_utf8(writer.into_inner()).context("XML response was not valid UTF-8")
 }
 
 async fn run(mut cli: Cli) -> Result<i32> {
@@ -268,11 +276,7 @@ async fn run(mut cli: Cli) -> Result<i32> {
 
     let mut conn: Box<dyn GvmConnection> = match cli.transport {
         Transport::Socket { path, timeout } => {
-            let timeout = if timeout < 0 {
-                None
-            } else {
-                Some(std::time::Duration::from_secs(timeout as u64))
-            };
+            let timeout = resolve_socket_timeout(timeout);
             let mut cfg = UnixSocketConfig::new(path);
             if let Some(t) = timeout {
                 cfg = cfg.with_timeout(t);
@@ -292,7 +296,7 @@ async fn run(mut cli: Cli) -> Result<i32> {
                 .with_remote_socket(remote_socket);
             Box::new(SshConnection::new(cfg))
         }
-        Transport::Tls {} => {
+        Transport::Tls => {
             return Err(anyhow!(
                 "TLS transport not implemented yet (see rust-gvm TLS transport issue)"
             ));
@@ -352,7 +356,9 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_auth_xml, format_xml};
+    use std::time::Duration;
+
+    use super::{build_auth_xml, format_xml, resolve_socket_timeout};
 
     #[test]
     fn pretty_prints_xml_with_indentation() {
@@ -372,5 +378,27 @@ mod tests {
         let xml = build_auth_xml(r#"<user>&""#, r#"<pass>&">"#);
         assert!(xml.contains("<username>&lt;user&gt;&amp;&quot;</username>"));
         assert!(xml.contains("<password>&lt;pass&gt;&amp;&quot;&gt;</password>"));
+    }
+
+    #[test]
+    fn rejects_invalid_utf8_without_pretty_printing() {
+        let error = format_xml(&[0x80], false).unwrap_err();
+        assert!(error.to_string().contains("not valid UTF-8"));
+    }
+
+    #[test]
+    fn rejects_malformed_xml_when_pretty_printing() {
+        let error = format_xml(b"<root></child>", true).unwrap_err();
+        assert!(error.to_string().contains("failed to pretty-print XML response"));
+    }
+
+    #[test]
+    fn timeout_minus_one_disables_socket_timeout() {
+        assert_eq!(resolve_socket_timeout(-1), None);
+    }
+
+    #[test]
+    fn timeout_zero_keeps_zero_second_socket_timeout() {
+        assert_eq!(resolve_socket_timeout(0), Some(Duration::from_secs(0)));
     }
 }
