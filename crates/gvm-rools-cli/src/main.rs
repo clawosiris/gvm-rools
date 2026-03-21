@@ -17,6 +17,7 @@ use nix::sys::termios::{tcgetattr, tcsetattr, LocalFlags, SetArg};
 use quick_xml::escape::escape;
 use quick_xml::events::Event;
 use quick_xml::{Reader, Writer};
+use zeroize::Zeroizing;
 
 #[derive(Parser, Debug)]
 #[command(name = "gvm-cli")]
@@ -27,8 +28,8 @@ struct Cli {
     gmp_username: Option<String>,
 
     /// GMP password (optional; if omitted but username is provided, gvm-cli will prompt)
-    #[arg(long, env = "GMP_PASSWORD")]
-    gmp_password: Option<String>,
+    #[arg(long, env = "GMP_PASSWORD", value_parser = parse_secret)]
+    gmp_password: Option<Zeroizing<String>>,
 
     /// XML request to send (if omitted, read from infile or stdin)
     #[arg(short = 'X', long)]
@@ -78,8 +79,8 @@ enum Transport {
         username: String,
 
         /// Password authentication (if omitted, SSH agent will be used)
-        #[arg(long)]
-        password: Option<String>,
+        #[arg(long, value_parser = parse_secret)]
+        password: Option<Zeroizing<String>>,
 
         /// Remote gvmd socket path
         #[arg(long, default_value = "/run/gvmd/gvmd.sock")]
@@ -88,6 +89,10 @@ enum Transport {
 
     /// TLS transport (not yet implemented in rust-gvm)
     Tls {},
+}
+
+fn parse_secret(value: &str) -> Result<Zeroizing<String>, String> {
+    Ok(Zeroizing::new(value.to_owned()))
 }
 
 async fn read_xml(cli: &Cli) -> Result<String> {
@@ -155,19 +160,20 @@ fn build_auth_xml(username: &str, password: &str) -> String {
     )
 }
 
-async fn resolve_gmp_password(cli: &Cli) -> Result<Option<String>> {
+async fn resolve_gmp_password(cli: &mut Cli) -> Result<Option<Zeroizing<String>>> {
     let Some(_) = cli.gmp_username.as_deref() else {
-        return Ok(cli.gmp_password.clone());
+        return Ok(cli.gmp_password.take());
     };
 
-    if let Some(password) = &cli.gmp_password {
-        return Ok(Some(password.clone()));
+    if let Some(password) = cli.gmp_password.take() {
+        return Ok(Some(password));
     }
 
     if std::io::stdin().is_terminal() {
         return tokio::task::spawn_blocking(|| prompt_password_from_tty("GMP Password: "))
             .await
             .context("GMP password prompt task failed")?
+            .map(Zeroizing::new)
             .map(Some)
             .context("failed to read GMP password from TTY");
     }
@@ -232,12 +238,12 @@ fn format_xml(xml: &[u8], pretty: bool) -> Result<String> {
     String::from_utf8(writer.into_inner()).context("pretty-printed XML was not valid UTF-8")
 }
 
-async fn run(cli: Cli) -> Result<i32> {
+async fn run(mut cli: Cli) -> Result<i32> {
     let xml = read_xml(&cli).await?.trim().to_string();
     if xml.is_empty() {
         return Err(anyhow!("no XML provided (use --xml, infile, or stdin)"));
     }
-    let gmp_password = resolve_gmp_password(&cli).await?;
+    let gmp_password = resolve_gmp_password(&mut cli).await?;
 
     let mut conn: Box<dyn GvmConnection> = match cli.transport {
         Transport::Socket { path, timeout } => {
@@ -259,7 +265,9 @@ async fn run(cli: Cli) -> Result<i32> {
             password,
             remote_socket,
         } => {
-            let auth = password.map(SshAuth::Password).unwrap_or(SshAuth::Agent);
+            let auth = password
+                .map(|password| SshAuth::Password(password.to_string()))
+                .unwrap_or(SshAuth::Agent);
             let cfg = SshConfig::new(hostname, username, auth)
                 .with_port(port)
                 .with_remote_socket(remote_socket);
@@ -277,7 +285,7 @@ async fn run(cli: Cli) -> Result<i32> {
     authenticate_if_needed(
         conn.as_mut(),
         cli.gmp_username.as_deref(),
-        gmp_password.as_deref(),
+        gmp_password.as_deref().map(String::as_str),
         cli.raw,
     )
     .await?;
