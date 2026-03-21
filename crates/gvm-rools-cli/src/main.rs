@@ -78,8 +78,8 @@ enum Transport {
         #[arg(long, default_value = "gvm")]
         username: String,
 
-        /// Password authentication (if omitted, SSH agent will be used)
-        #[arg(long, value_parser = parse_secret)]
+        /// Password authentication (if omitted, prompt on TTY, otherwise fall back to SSH agent)
+        #[arg(long, env = "SSH_PASSWORD", value_parser = parse_secret)]
         password: Option<Zeroizing<String>>,
 
         /// Remote gvmd socket path
@@ -183,6 +183,27 @@ async fn resolve_gmp_password(cli: &mut Cli) -> Result<Option<Zeroizing<String>>
     ))
 }
 
+async fn resolve_ssh_auth(password: Option<Zeroizing<String>>) -> Result<SshAuth> {
+    if let Some(password) = password {
+        return Ok(SshAuth::Password(password.to_string()));
+    }
+
+    if std::io::stdin().is_terminal() {
+        let password =
+            tokio::task::spawn_blocking(|| prompt_password_from_tty("SSH Password (leave empty for SSH agent): "))
+                .await
+                .context("SSH password prompt task failed")?
+                .context("failed to read SSH password from TTY")?;
+
+        if !password.is_empty() {
+            let password = Zeroizing::new(password);
+            return Ok(SshAuth::Password(password.to_string()));
+        }
+    }
+
+    Ok(SshAuth::Agent)
+}
+
 fn prompt_password_from_tty(prompt: &str) -> std::io::Result<String> {
     let stdin = std::io::stdin();
     let mut stderr = std::io::stderr().lock();
@@ -265,9 +286,7 @@ async fn run(mut cli: Cli) -> Result<i32> {
             password,
             remote_socket,
         } => {
-            let auth = password
-                .map(|password| SshAuth::Password(password.to_string()))
-                .unwrap_or(SshAuth::Agent);
+            let auth = resolve_ssh_auth(password).await?;
             let cfg = SshConfig::new(hostname, username, auth)
                 .with_port(port)
                 .with_remote_socket(remote_socket);
