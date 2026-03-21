@@ -86,7 +86,7 @@ enum Transport {
     Tls {},
 }
 
-fn read_xml(cli: &Cli) -> Result<String> {
+async fn read_xml(cli: &Cli) -> Result<String> {
     if let Some(xml) = &cli.xml {
         return Ok(xml.clone());
     }
@@ -97,10 +97,14 @@ fn read_xml(cli: &Cli) -> Result<String> {
     }
 
     // stdin
-    let mut buf = String::new();
-    std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
-        .context("failed to read stdin")?;
-    Ok(buf)
+    tokio::task::spawn_blocking(|| {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            .context("failed to read stdin")?;
+        Ok::<_, anyhow::Error>(buf)
+    })
+    .await
+    .context("stdin read task failed")?
 }
 
 async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
@@ -147,7 +151,7 @@ fn build_auth_xml(username: &str, password: &str) -> String {
     )
 }
 
-fn resolve_gmp_password(cli: &Cli) -> Result<Option<String>> {
+async fn resolve_gmp_password(cli: &Cli) -> Result<Option<String>> {
     let Some(_) = cli.gmp_username.as_deref() else {
         return Ok(cli.gmp_password.clone());
     };
@@ -157,7 +161,9 @@ fn resolve_gmp_password(cli: &Cli) -> Result<Option<String>> {
     }
 
     if std::io::stdin().is_terminal() {
-        return prompt_password_from_tty("GMP Password: ")
+        return tokio::task::spawn_blocking(|| prompt_password_from_tty("GMP Password: "))
+            .await
+            .context("GMP password prompt task failed")?
             .map(Some)
             .context("failed to read GMP password from TTY");
     }
@@ -241,11 +247,11 @@ fn format_xml(xml: &[u8], pretty: bool) -> Result<String> {
 }
 
 async fn run(cli: Cli) -> Result<i32> {
-    let xml = read_xml(&cli)?.trim().to_string();
+    let xml = read_xml(&cli).await?.trim().to_string();
     if xml.is_empty() {
         return Err(anyhow!("no XML provided (use --xml, infile, or stdin)"));
     }
-    let gmp_password = resolve_gmp_password(&cli)?;
+    let gmp_password = resolve_gmp_password(&cli).await?;
 
     let mut conn: Box<dyn GvmConnection> = match cli.transport {
         Transport::Socket { path, timeout } => {
