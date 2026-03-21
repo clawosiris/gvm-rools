@@ -24,8 +24,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    name: "Release v${{ inputs.version }}"
+  # ──────────────────────────────────────────────
+  # Step 1: Version bump + tag via pontos
+  # ──────────────────────────────────────────────
+  prepare:
+    name: "Prepare v${{ inputs.version }}"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -84,24 +87,128 @@ jobs:
             git push origin "$TAG" --force
           fi
 
-      - name: Wait for release workflow
+  # ──────────────────────────────────────────────
+  # Step 2: Test
+  # ──────────────────────────────────────────────
+  test:
+    name: Test
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: v${{ inputs.version }}
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - run: cargo test --workspace --all-features
+
+  # ──────────────────────────────────────────────
+  # Step 3: SBOM generation
+  # ──────────────────────────────────────────────
+  sbom:
+    name: Generate SBOM
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: v${{ inputs.version }}
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx
+
+      - name: Generate CycloneDX SBOM (JSON)
+        run: cargo cyclonedx --format json --all --spec-version 1.5
+
+      - name: Generate CycloneDX SBOM (XML)
+        run: cargo cyclonedx --format xml --all --spec-version 1.5
+
+      - name: Collect SBOMs
+        shell: bash
+        run: |
+          mkdir -p sbom-artifacts
+          find . -name '*.cdx.json' -not -path '*/target/*' -not -path '*/fixtures/*' -not -path '*/sbom-artifacts/*' -exec cp {} sbom-artifacts/ \;
+          find . -name '*.cdx.xml' -not -path '*/target/*' -not -path '*/fixtures/*' -not -path '*/sbom-artifacts/*' -exec cp {} sbom-artifacts/ \;
+          ls -la sbom-artifacts/
+
+      - name: Post-process CycloneDX JSON SBOMs
+        shell: bash
+        run: |
+          python3 scripts/sbom_postprocess.py --cargo-toml Cargo.toml sbom-artifacts/*.cdx.json
+
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+        with:
+          go-version: stable
+
+      - name: Install sbomqs
+        run: |
+          go install github.com/interlynk-io/sbomqs@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Score post-processed SBOMs
+        shell: bash
+        run: |
+          sbomqs score --json sbom-artifacts/*.cdx.json > sbomqs-results.json
+          python3 - sbomqs-results.json <<'PY'
+          import json
+          import sys
+
+          threshold = 7.0
+          with open(sys.argv[1], "r", encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          failures = []
+          for entry in data.get("files", []):
+              score = float(entry.get("avg_score", 0.0))
+              path = entry.get("path") or entry.get("file") or entry.get("fileName") or "<unknown>"
+              print(f"{path}: {score:.2f}/10")
+              if score < threshold:
+                  failures.append((path, score))
+
+          if failures:
+              for path, score in failures:
+                  print(f"::error file={path}::SBOM quality score below {threshold:.1f}: {score:.2f}")
+              raise SystemExit(1)
+          PY
+
+      - name: Package SBOMs
+        run: |
+          cd sbom-artifacts
+          tar czf ../gvm-rools-sbom.tar.gz *.cdx.*
+          cd ..
+          sha256sum gvm-rools-sbom.tar.gz > gvm-rools-sbom.tar.gz.sha256
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: sbom
+          path: |
+            gvm-rools-sbom.tar.gz
+            gvm-rools-sbom.tar.gz.sha256
+            sbomqs-results.json
+
+  # ──────────────────────────────────────────────
+  # Step 4: Create GitHub Release with all artifacts
+  # ──────────────────────────────────────────────
+  release:
+    name: Publish Release
+    needs: [sbom]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: v${{ inputs.version }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v${{ inputs.version }}"
-          echo "Tag $TAG created. Waiting for release.yml..."
-          sleep 15
-
-          for i in $(seq 1 60); do
-            RUN_ID=$(gh run list --workflow=release.yml --limit=10 --json databaseId,headBranch --jq ".[] | select(.headBranch==\"$TAG\") | .databaseId" 2>/dev/null | head -1 || true)
-            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
-              echo "Found release workflow run: $RUN_ID"
-              gh run watch "$RUN_ID" --exit-status || exit 1
-              echo "✅ Release workflow completed"
-              exit 0
-            fi
-            echo "Waiting... ($i/60)"
-            sleep 15
-          done
-          echo "::error::Release workflow did not trigger within timeout"
-          exit 1
+          gh release upload "v${{ inputs.version }}" artifacts/* --clobber
