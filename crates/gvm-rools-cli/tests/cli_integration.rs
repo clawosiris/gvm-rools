@@ -250,6 +250,11 @@ async fn test_non_2xx_raw_mode() -> Result<()> {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(
+        stdout.contains(r#"<get_tasks_response status="401" status_text="Not authenticated""#),
+        "stdout: {stdout}"
+    );
     Ok(())
 }
 
