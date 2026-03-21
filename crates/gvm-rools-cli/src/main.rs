@@ -10,6 +10,7 @@ use gvm_connection::{
     GvmConnection, SshAuth, SshConfig, SshConnection, UnixSocketConfig, UnixSocketConnection,
 };
 use gvm_protocol::Response;
+use quick_xml::escape::escape;
 use quick_xml::events::Event;
 use quick_xml::{Reader, Writer};
 
@@ -115,10 +116,7 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
     let password =
         password.ok_or_else(|| anyhow!("--gmp-password is required when --gmp-username is set"))?;
 
-    let auth_xml = format!(
-        "<authenticate><credentials><username>{}</username><password>{}</password></credentials></authenticate>",
-        username, password
-    );
+    let auth_xml = build_auth_xml(username, password);
 
     conn.send(auth_xml.as_bytes())
         .await
@@ -139,6 +137,14 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
     }
 
     Ok(())
+}
+
+fn build_auth_xml(username: &str, password: &str) -> String {
+    let username = escape(username);
+    let password = escape(password);
+    format!(
+        "<authenticate><credentials><username>{username}</username><password>{password}</password></credentials></authenticate>"
+    )
 }
 
 fn resolve_gmp_password(cli: &Cli) -> Result<Option<String>> {
@@ -327,7 +333,7 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::format_xml;
+    use super::{build_auth_xml, format_xml};
 
     #[test]
     fn pretty_prints_xml_with_indentation() {
@@ -340,5 +346,12 @@ mod tests {
         let original = "<root><child>value</child></root>";
         let formatted = format_xml(original.as_bytes(), false).unwrap();
         assert_eq!(formatted, original);
+    }
+
+    #[test]
+    fn test_xml_escape_in_credentials() {
+        let xml = build_auth_xml(r#"<user>&""#, r#"<pass>&">"#);
+        assert!(xml.contains("<username>&lt;user&gt;&amp;&quot;</username>"));
+        assert!(xml.contains("<password>&lt;pass&gt;&amp;&quot;&gt;</password>"));
     }
 }
