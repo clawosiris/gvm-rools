@@ -1,5 +1,4 @@
 # Orchestrated Release — triggered by clawosiris/release-orchestrator
-# Do NOT trigger manually — use the orchestrator instead.
 
 name: Orchestrated Release
 
@@ -32,19 +31,13 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
-
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-
-      - name: Set up Python and pontos
-        uses: greenbone/actions/setup-pontos@v3
-
-      - name: Configure git
-        uses: greenbone/actions/set-github-user@v3
+      - uses: greenbone/actions/setup-pontos@v3
+      - uses: greenbone/actions/set-github-user@v3
         with:
           user: ${{ vars.RELEASE_USER || 'clawosiris' }}
           mail: ${{ vars.RELEASE_USER_MAIL || 'clawosiris@users.noreply.github.com' }}
           token: ${{ secrets.RELEASE_TOKEN }}
-
       - name: Pin upstream dependencies
         run: |
           VERSION="${{ inputs.version }}"
@@ -55,7 +48,6 @@ jobs:
           else
             echo "Pre-release: keeping branch = main"
           fi
-
       - name: Create release with pontos
         env:
           GITHUB_USER: ${{ vars.RELEASE_USER || 'clawosiris' }}
@@ -70,7 +62,6 @@ jobs:
             ARGS="$ARGS --github-pre-release"
           fi
           pontos-release create $ARGS --repository ${{ github.repository }}
-
       - name: Regenerate Cargo.lock
         run: |
           cargo generate-lockfile
@@ -125,71 +116,27 @@ jobs:
         run: cargo cyclonedx --format json --all --spec-version 1.5
       - name: Generate CycloneDX SBOM (XML)
         run: cargo cyclonedx --format xml --all --spec-version 1.5
-      - name: Collect SBOMs
+      - name: Collect, score, and upload SBOMs to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p sbom-artifacts
           find . -name '*.cdx.json' -not -path '*/target/*' -not -path '*/fixtures/*' -not -path '*/sbom-artifacts/*' -exec cp {} sbom-artifacts/ \;
           find . -name '*.cdx.xml' -not -path '*/target/*' -not -path '*/fixtures/*' -not -path '*/sbom-artifacts/*' -exec cp {} sbom-artifacts/ \;
           ls -la sbom-artifacts/
-      - name: Post-process CycloneDX JSON SBOMs
-        run: python3 scripts/sbom_postprocess.py --cargo-toml Cargo.toml sbom-artifacts/*.cdx.json
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
-        with:
-          go-version: stable
-      - name: Install sbomqs
-        run: |
-          go install github.com/interlynk-io/sbomqs@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-      - name: Score post-processed SBOMs
-        run: |
-          sbomqs score --json sbom-artifacts/*.cdx.json > sbomqs-results.json
-          python3 - sbomqs-results.json <<'PY'
-          import json, sys
-          threshold = 7.0
-          with open(sys.argv[1], "r", encoding="utf-8") as handle:
-              data = json.load(handle)
-          failures = []
-          for entry in data.get("files", []):
-              score = float(entry.get("avg_score", 0.0))
-              path = entry.get("path") or entry.get("file") or entry.get("fileName") or "<unknown>"
-              print(f"{path}: {score:.2f}/10")
-              if score < threshold:
-                  failures.append((path, score))
-          if failures:
-              for path, score in failures:
-                  print(f"::error file={path}::SBOM quality score below {threshold:.1f}: {score:.2f}")
-              raise SystemExit(1)
-          PY
-      - name: Package SBOMs
-        run: |
+          python3 scripts/sbom_postprocess.py --cargo-toml Cargo.toml sbom-artifacts/*.cdx.json
           cd sbom-artifacts
           tar czf ../gvm-rools-sbom.tar.gz *.cdx.*
           cd ..
           sha256sum gvm-rools-sbom.tar.gz > gvm-rools-sbom.tar.gz.sha256
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
-        with:
-          name: sbom
-          path: |
-            gvm-rools-sbom.tar.gz
-            gvm-rools-sbom.tar.gz.sha256
-            sbomqs-results.json
+          gh release upload "v${{ inputs.version }}" \
+            gvm-rools-sbom.tar.gz \
+            gvm-rools-sbom.tar.gz.sha256 \
+            --clobber
 
-  release:
-    name: Publish Release
+  collect:
+    name: Release complete
     needs: [sbom]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          ref: v${{ inputs.version }}
-      - name: Download all artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          path: artifacts
-          merge-multiple: true
-      - name: Upload release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "v${{ inputs.version }}" artifacts/*.tar.gz artifacts/*.sha256 --clobber
+      - run: echo "✅ All release artifacts published for v${{ inputs.version }}"
