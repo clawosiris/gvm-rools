@@ -79,6 +79,6 @@ jobs:
             git config --global url."https://x-access-token:${RELEASE_TOKEN}@github.com/".insteadOf "https://github.com/"
           fi
 
-      - uses: dtolnay/rust-toolchain@1.75.0
+      - uses: dtolnay/rust-toolchain@1.85.0
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - run: cargo test --workspace
