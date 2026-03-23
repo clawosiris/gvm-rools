@@ -1,0 +1,12 @@
+# Ignored advisories (temporary)
+# - RUSTSEC-2026-0044 / RUSTSEC-2026-0048: aws-lc-sys via russh 0.57.1 -> aws-lc-rs 1.16.1 -> aws-lc-sys 0.38.x
+# - RUSTSEC-2023-0071: rsa Marvin Attack (no fixed upgrade currently)
+#
+# Follow-up: upgrade russh / switch SSH backend to remove these.
+
+[advisories]
+ignore = [
+  "RUSTSEC-2026-0048",
+  "RUSTSEC-2026-0044",
+  "RUSTSEC-2023-0071",
+]
