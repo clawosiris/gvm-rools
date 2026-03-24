@@ -961,8 +961,8 @@ dependencies = [
 
 [[package]]
 name = "gvm-connection"
-version = "0.2.1-alpha.6"
-source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#edaac7a2a4199c0ba7e4db2d43b550f92b139b67"
+version = "0.3.0-alpha.10"
+source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#cdc2b32dcce7a69a8c2dbc5db6715681c210d9a1"
 dependencies = [
  "async-trait",
  "gvm-protocol",
@@ -974,8 +974,8 @@ dependencies = [
 
 [[package]]
 name = "gvm-mock-server"
-version = "0.2.1-alpha.6"
-source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#edaac7a2a4199c0ba7e4db2d43b550f92b139b67"
+version = "0.3.0-alpha.10"
+source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#cdc2b32dcce7a69a8c2dbc5db6715681c210d9a1"
 dependencies = [
  "clap",
  "gvm-protocol",
@@ -990,8 +990,8 @@ dependencies = [
 
 [[package]]
 name = "gvm-protocol"
-version = "0.2.1-alpha.6"
-source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#edaac7a2a4199c0ba7e4db2d43b550f92b139b67"
+version = "0.3.0-alpha.10"
+source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#cdc2b32dcce7a69a8c2dbc5db6715681c210d9a1"
 dependencies = [
  "quick-xml 0.39.2",
  "thiserror 2.0.18",
@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "gvm-rools-cli"
-version = "0.3.0-alpha.7"
+version = "0.3.0-alpha.10"
 dependencies = [
  "anyhow",
  "assert_cmd",
