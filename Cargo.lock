@@ -961,11 +961,11 @@ dependencies = [
 
 [[package]]
 name = "gvm-connection"
-version = "0.3.0-alpha.10"
-source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#cdc2b32dcce7a69a8c2dbc5db6715681c210d9a1"
+version = "0.3.0"
+source = "git+https://github.com/clawosiris/rust-gvm.git?tag=v0.3.0#68a20630e0888d82c289a5cd68554adfa847a1d3"
 dependencies = [
  "async-trait",
- "gvm-protocol",
+ "gvm-protocol 0.3.0 (git+https://github.com/clawosiris/rust-gvm.git?tag=v0.3.0)",
  "russh",
  "thiserror 2.0.18",
  "tokio",
@@ -974,11 +974,11 @@ dependencies = [
 
 [[package]]
 name = "gvm-mock-server"
-version = "0.3.0-alpha.10"
-source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#cdc2b32dcce7a69a8c2dbc5db6715681c210d9a1"
+version = "0.3.0"
+source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#68a20630e0888d82c289a5cd68554adfa847a1d3"
 dependencies = [
  "clap",
- "gvm-protocol",
+ "gvm-protocol 0.3.0 (git+https://github.com/clawosiris/rust-gvm.git?branch=main)",
  "quick-xml 0.39.2",
  "russh",
  "sha1 0.10.6",
@@ -990,8 +990,17 @@ dependencies = [
 
 [[package]]
 name = "gvm-protocol"
-version = "0.3.0-alpha.10"
-source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#cdc2b32dcce7a69a8c2dbc5db6715681c210d9a1"
+version = "0.3.0"
+source = "git+https://github.com/clawosiris/rust-gvm.git?tag=v0.3.0#68a20630e0888d82c289a5cd68554adfa847a1d3"
+dependencies = [
+ "quick-xml 0.39.2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "gvm-protocol"
+version = "0.3.0"
+source = "git+https://github.com/clawosiris/rust-gvm.git?branch=main#68a20630e0888d82c289a5cd68554adfa847a1d3"
 dependencies = [
  "quick-xml 0.39.2",
  "thiserror 2.0.18",
@@ -999,14 +1008,14 @@ dependencies = [
 
 [[package]]
 name = "gvm-rools-cli"
-version = "0.3.0-alpha.10"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
  "gvm-connection",
  "gvm-mock-server",
- "gvm-protocol",
+ "gvm-protocol 0.3.0 (git+https://github.com/clawosiris/rust-gvm.git?tag=v0.3.0)",
  "libc",
  "predicates",
  "quick-xml 0.37.5",
