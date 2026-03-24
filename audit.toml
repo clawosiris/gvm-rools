@@ -1,0 +1,9 @@
+# Ignored advisories — blocked by russh 0.57.1 pinning aws-lc-rs 1.16.1
+# Track: https://github.com/clawosiris/gvm-rools/issues/8
+
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0048",  # aws-lc-sys CRL Distribution Point (needs russh update)
+    "RUSTSEC-2026-0044",  # aws-lc-sys X.509 Name Constraints (needs russh update)
+    "RUSTSEC-2023-0071",  # rsa Marvin Attack (no fix available upstream)
+]

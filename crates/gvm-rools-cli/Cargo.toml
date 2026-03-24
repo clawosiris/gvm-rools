@@ -15,11 +15,8 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-thiserror.workspace = true
 tokio.workspace = true
-gvm-client.workspace = true
 gvm-connection.workspace = true
-gvm-gmp.workspace = true
 gvm-protocol.workspace = true
 libc = "0.2"
 quick-xml = "0.37"
