@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use std::io::{IsTerminal, Write};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -142,6 +142,21 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
 }
 
 fn resolve_gmp_password(cli: &Cli) -> Result<Option<String>> {
+    resolve_gmp_password_with(
+        cli,
+        std::io::stdin().is_terminal(),
+        prompt_password_from_tty,
+    )
+}
+
+fn resolve_gmp_password_with<F>(
+    cli: &Cli,
+    stdin_is_terminal: bool,
+    prompt_password: F,
+) -> Result<Option<String>>
+where
+    F: FnOnce(&str) -> std::io::Result<String>,
+{
     let Some(_) = cli.gmp_username.as_deref() else {
         return Ok(cli.gmp_password.clone());
     };
@@ -150,8 +165,8 @@ fn resolve_gmp_password(cli: &Cli) -> Result<Option<String>> {
         return Ok(Some(password.clone()));
     }
 
-    if std::io::stdin().is_terminal() {
-        return prompt_password_from_tty("GMP Password: ")
+    if stdin_is_terminal {
+        return prompt_password("GMP Password: ")
             .map(Some)
             .context("failed to read GMP password from TTY");
     }
@@ -162,49 +177,7 @@ fn resolve_gmp_password(cli: &Cli) -> Result<Option<String>> {
 }
 
 fn prompt_password_from_tty(prompt: &str) -> std::io::Result<String> {
-    let stdin = std::io::stdin();
-    let mut stderr = std::io::stderr().lock();
-
-    stderr.write_all(prompt.as_bytes())?;
-    stderr.flush()?;
-
-    let fd = libc::STDIN_FILENO;
-    // SAFETY: `termios` is a plain old data struct and zero initialization is valid before
-    // passing it to `tcgetattr`, which fills the fields.
-    let mut termios = unsafe { std::mem::zeroed::<libc::termios>() };
-
-    // SAFETY: `fd` is stdin, which we already verified is a terminal, and `termios` points to
-    // valid writable memory.
-    if unsafe { libc::tcgetattr(fd, &mut termios) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    let original = termios;
-    termios.c_lflag &= !libc::ECHO;
-
-    // SAFETY: same preconditions as the previous `tcgetattr` call; the struct was initialized
-    // from the current terminal settings and is safe to pass back to libc.
-    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &termios) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    let mut password = String::new();
-    let read_result = stdin.read_line(&mut password);
-
-    // SAFETY: restore the original terminal flags on the same valid terminal file descriptor.
-    let restore_result = unsafe { libc::tcsetattr(fd, libc::TCSANOW, &original) };
-    stderr.write_all(b"\n")?;
-    stderr.flush()?;
-
-    if restore_result != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    read_result?;
-    while matches!(password.chars().last(), Some('\n' | '\r')) {
-        password.pop();
-    }
-    Ok(password)
+    rpassword::prompt_password(prompt)
 }
 
 fn format_xml(xml: &[u8], pretty: bool) -> Result<String> {
@@ -327,7 +300,104 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::format_xml;
+    use std::io::{Error, ErrorKind};
+
+    use super::{format_xml, resolve_gmp_password_with, Cli, Transport};
+
+    fn socket_transport() -> Transport {
+        Transport::Socket {
+            path: "/tmp/gvmd.sock".into(),
+            timeout: 60,
+        }
+    }
+
+    #[test]
+    fn returns_password_without_prompt_when_username_not_set() {
+        let cli = Cli {
+            gmp_username: None,
+            gmp_password: Some("secret".to_string()),
+            xml: None,
+            raw: false,
+            pretty: false,
+            duration: false,
+            infile: None,
+            transport: socket_transport(),
+        };
+
+        let result = resolve_gmp_password_with(&cli, false, |_| {
+            panic!("prompt should not be called when username is unset")
+        })
+        .unwrap();
+
+        assert_eq!(result.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn prompts_for_password_when_username_is_set_and_stdin_is_tty() {
+        let cli = Cli {
+            gmp_username: Some("admin".to_string()),
+            gmp_password: None,
+            xml: None,
+            raw: false,
+            pretty: false,
+            duration: false,
+            infile: None,
+            transport: socket_transport(),
+        };
+
+        let result =
+            resolve_gmp_password_with(&cli, true, |prompt| Ok(format!("from-prompt:{prompt}")))
+                .unwrap();
+
+        assert_eq!(result.as_deref(), Some("from-prompt:GMP Password: "));
+    }
+
+    #[test]
+    fn returns_error_when_username_is_set_without_password_and_stdin_is_not_tty() {
+        let cli = Cli {
+            gmp_username: Some("admin".to_string()),
+            gmp_password: None,
+            xml: None,
+            raw: false,
+            pretty: false,
+            duration: false,
+            infile: None,
+            transport: socket_transport(),
+        };
+
+        let error = resolve_gmp_password_with(&cli, false, |_| {
+            panic!("prompt should not be called when stdin is not a TTY")
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "--gmp-password is required when --gmp-username is set"
+        );
+    }
+
+    #[test]
+    fn wraps_prompt_errors_with_tty_context() {
+        let cli = Cli {
+            gmp_username: Some("admin".to_string()),
+            gmp_password: None,
+            xml: None,
+            raw: false,
+            pretty: false,
+            duration: false,
+            infile: None,
+            transport: socket_transport(),
+        };
+
+        let error = resolve_gmp_password_with(&cli, true, |_| {
+            Err(Error::new(ErrorKind::Interrupted, "prompt failed"))
+        })
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("failed to read GMP password from TTY"));
+    }
 
     #[test]
     fn pretty_prints_xml_with_indentation() {
