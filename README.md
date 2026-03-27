@@ -1,5 +1,8 @@
 # gvm-rools
 
+[![CI](https://github.com/clawosiris/gvm-rools/actions/workflows/ci.yml/badge.svg)](https://github.com/clawosiris/gvm-rools/actions/workflows/ci.yml)
+[![Security](https://github.com/clawosiris/gvm-rools/actions/workflows/security.yml/badge.svg)](https://github.com/clawosiris/gvm-rools/actions/workflows/security.yml)
+
 Rust reimplementation of [`greenbone/gvm-tools`](https://github.com/greenbone/gvm-tools), built on top of the **rust-gvm** library crates.
 
 ## Scope (initial)
