@@ -18,8 +18,8 @@ clap.workspace = true
 tokio.workspace = true
 gvm-connection.workspace = true
 gvm-protocol.workspace = true
-libc = "0.2"
 quick-xml = "0.37"
+rpassword = "7"
 
 [dev-dependencies]
 assert_cmd = "2"
