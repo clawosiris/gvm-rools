@@ -9,8 +9,9 @@ use clap::{Parser, Subcommand};
 use gvm_connection::{
     GvmConnection, SshAuth, SshConfig, SshConnection, UnixSocketConfig, UnixSocketConnection,
 };
-use gvm_protocol::Response;
-use quick_xml::escape::escape;
+use gvm_gmp::commands::authentication::authenticate as authenticate_command;
+use gvm_gmp::responses::AuthenticateResponse;
+use gvm_protocol::{Request, Response};
 use quick_xml::events::Event;
 use quick_xml::{Reader, Writer};
 use zeroize::Zeroizing;
@@ -134,9 +135,9 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
     let password =
         password.ok_or_else(|| anyhow!("--gmp-password is required when --gmp-username is set"))?;
 
-    let auth_xml = build_auth_xml(username, password);
+    let auth_command = authenticate_command(username, password.as_str());
 
-    conn.send(auth_xml.as_bytes())
+    conn.send(&auth_command.to_bytes())
         .await
         .context("send authenticate failed")?;
     let resp_bytes = conn.read().await.context("read authenticate failed")?;
@@ -146,23 +147,10 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
         return Ok(());
     }
 
-    if !resp.is_success() {
-        let status = resp.status_code().unwrap_or(0);
-        let text = resp
-            .status_text()
-            .unwrap_or_else(|| "<no status text>".to_string());
-        return Err(anyhow!("authentication failed (status {status}): {text}"));
-    }
+    AuthenticateResponse::from_response(&resp)
+        .map_err(|error| anyhow!("authentication failed: {error}"))?;
 
     Ok(())
-}
-
-fn build_auth_xml(username: &str, password: &str) -> Zeroizing<String> {
-    Zeroizing::new(format!(
-        "<authenticate><credentials><username>{}</username><password>{}</password></credentials></authenticate>",
-        escape(username),
-        escape(password)
-    ))
 }
 
 async fn resolve_gmp_password(cli: &mut Cli) -> Result<Option<Zeroizing<String>>> {
@@ -379,9 +367,10 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_auth_xml, format_xml, resolve_gmp_password_with, resolve_ssh_password_with, Cli,
-        PasswordResolution, Transport,
+        authenticate_command, format_xml, resolve_gmp_password_with, resolve_ssh_password_with,
+        Cli, PasswordResolution, Transport,
     };
+    use gvm_protocol::Request;
 
     fn socket_transport() -> Transport {
         Transport::Socket {
@@ -481,10 +470,11 @@ mod tests {
 
     #[test]
     fn escapes_special_characters_in_auth_xml() {
-        let auth_xml = build_auth_xml("admin&<>'\"", "foo&bar<baz>'\"");
+        let command = authenticate_command("admin&<>'\"", "foo&bar<baz>'\"");
+        let auth_xml = String::from_utf8(command.to_bytes()).expect("auth xml utf-8");
 
         assert_eq!(
-            auth_xml.as_str(),
+            auth_xml,
             "<authenticate><credentials><username>admin&amp;&lt;&gt;&apos;&quot;</username><password>foo&amp;bar&lt;baz&gt;&apos;&quot;</password></credentials></authenticate>"
         );
     }
