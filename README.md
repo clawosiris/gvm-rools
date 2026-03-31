@@ -3,6 +3,11 @@
 [![CI](https://github.com/clawosiris/gvm-rools/actions/workflows/ci.yml/badge.svg)](https://github.com/clawosiris/gvm-rools/actions/workflows/ci.yml)
 [![Security](https://github.com/clawosiris/gvm-rools/actions/workflows/security.yml/badge.svg)](https://github.com/clawosiris/gvm-rools/actions/workflows/security.yml)
 
+> [!NOTE]
+> **Releases** are managed via the [release-orchestrator](https://github.com/clawosiris/release-orchestrator).
+> To create a nightly/alpha build, create an alpha release in the orchestrator.
+> See [RELEASING.md](./RELEASING.md) for details.
+
 Rust reimplementation of [`greenbone/gvm-tools`](https://github.com/greenbone/gvm-tools), built on top of the **rust-gvm** library crates.
 
 ## Scope (initial)
