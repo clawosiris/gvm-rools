@@ -10,13 +10,9 @@ on:
       - '*.md'
       - 'LICENSE'
   pull_request:
+    # Keep the workflow running for docs-only PRs so branch protection always
+    # receives the required `Security` status check.
     branches: [main]
-    paths-ignore:
-      - 'journal/**'
-      - 'docs/**'
-      - 'spec/**'
-      - '*.md'
-      - 'LICENSE'
   schedule:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC
 
@@ -86,3 +82,22 @@ jobs:
         uses: github/codeql-action/upload-sarif@ff0a06e83cb2de871e5a09832bc6a81e7276941f # v3
         with:
           sarif_file: semgrep.sarif
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs:
+      - cargo-audit
+      - cargo-machete
+      - semgrep
+    steps:
+      - name: Require all security jobs to pass
+        env:
+          CARGO_AUDIT_RESULT: ${{ needs.cargo-audit.result }}
+          CARGO_MACHETE_RESULT: ${{ needs.cargo-machete.result }}
+          SEMGREP_RESULT: ${{ needs.semgrep.result }}
+        run: |
+          test "$CARGO_AUDIT_RESULT" = success
+          test "$CARGO_MACHETE_RESULT" = success
+          test "$SEMGREP_RESULT" = success
