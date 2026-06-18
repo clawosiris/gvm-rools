@@ -41,7 +41,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          gh api repos/${{ github.repository }}/branches/main/protection > "$RUNNER_TEMP/main-protection.json"
+          gh api repos/${{ github.repository }}/branches/main/protection > "$RUNNER_TEMP/main-protection-raw.json"
+          jq '{
+            required_status_checks: (.required_status_checks | if . == null then null else {strict, checks} end),
+            enforce_admins: .enforce_admins.enabled,
+            required_pull_request_reviews: (.required_pull_request_reviews | if . == null then null else {
+              dismiss_stale_reviews,
+              require_code_owner_reviews,
+              require_last_push_approval,
+              required_approving_review_count
+            } end),
+            restrictions: .restrictions,
+            required_linear_history: .required_linear_history.enabled,
+            allow_force_pushes: .allow_force_pushes.enabled,
+            allow_deletions: .allow_deletions.enabled,
+            block_creations: .block_creations.enabled,
+            required_conversation_resolution: .required_conversation_resolution.enabled,
+            lock_branch: .lock_branch.enabled,
+            allow_fork_syncing: .allow_fork_syncing.enabled
+          }' "$RUNNER_TEMP/main-protection-raw.json" > "$RUNNER_TEMP/main-protection.json"
           gh api --method DELETE repos/${{ github.repository }}/branches/main/protection/required_status_checks || true
           gh api --method DELETE repos/${{ github.repository }}/branches/main/protection/required_pull_request_reviews || true
       - name: Pin upstream dependencies
@@ -80,8 +98,8 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add Cargo.lock
-            git commit --amend --no-edit
-            git push --force-with-lease
+            git commit -m "build(release): refresh Cargo.lock for v${{ inputs.version }}"
+            git push
             TAG="v${{ inputs.version }}"
             git tag -f "$TAG"
             git push origin "$TAG" --force
