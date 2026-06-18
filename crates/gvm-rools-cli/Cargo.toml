@@ -19,7 +19,7 @@ tokio.workspace = true
 gvm-connection.workspace = true
 gvm-protocol.workspace = true
 gvm-gmp.workspace = true
-quick-xml = "0.39"
+quick-xml = "0.40"
 rpassword = "7"
 zeroize = "1"
 
