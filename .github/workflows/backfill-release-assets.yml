@@ -74,4 +74,12 @@ jobs:
       - name: Upload assets to existing release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "v${{ inputs.version }}" dist/* --clobber
+        run: |
+          gh release upload "v${{ inputs.version }}" \
+            "dist/gvm-cli-v${{ inputs.version }}-x86_64-unknown-linux-musl" \
+            "dist/gvm-rools-v${{ inputs.version }}-x86_64-unknown-linux-musl.tar.gz" \
+            "dist/gvm-rools_${{ inputs.version }}_amd64.deb" \
+            "dist/gvm-rools-${{ inputs.version }}-1.x86_64.rpm" \
+            "dist/gvm-rools-${{ inputs.version }}-1-x86_64.pkg.tar.zst" \
+            "dist/SHA256SUMS" \
+            --clobber
