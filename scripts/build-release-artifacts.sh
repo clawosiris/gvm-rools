@@ -19,6 +19,7 @@ cd "${ROOT_DIR}"
 
 TARGET_DIR="target/${TARGET}/release"
 BINARY_PATH="${TARGET_DIR}/${BIN_NAME}"
+STATIC_BINARY_PATH="${DIST_DIR}/${BIN_NAME}-v${VERSION}-${TARGET}"
 TARBALL_BASENAME="${PACKAGE_NAME}-v${VERSION}-${TARGET}"
 TARBALL_PATH="${DIST_DIR}/${TARBALL_BASENAME}.tar.gz"
 PKGROOT_DIR="${DIST_DIR}/pkgroot"
@@ -28,6 +29,7 @@ mkdir -p "${DIST_DIR}" "${PKGROOT_DIR}/usr/bin"
 
 cargo build --locked --release --package gvm-rools-cli --bin "${BIN_NAME}" --target "${TARGET}"
 
+install -Dm755 "${BINARY_PATH}" "${STATIC_BINARY_PATH}"
 install -Dm755 "${BINARY_PATH}" "${PKGROOT_DIR}/usr/bin/${BIN_NAME}"
 
 TARBALL_STAGE="$(mktemp -d)"
@@ -57,6 +59,7 @@ nfpm package \
 (
   cd "${DIST_DIR}"
   sha256sum \
+    "$(basename "${STATIC_BINARY_PATH}")" \
     "$(basename "${TARBALL_PATH}")" \
     "${PACKAGE_NAME}_${VERSION}_amd64.deb" \
     "${PACKAGE_NAME}-${VERSION}-1.x86_64.rpm" \
