@@ -6,14 +6,22 @@ use std::process::Output;
 
 use anyhow::{Context, Result};
 use gvm_mock_server::{MockGmpServer, ServerMode};
+use gvm_protocol::Response;
 use tempfile::{NamedTempFile, TempDir};
 
 async fn start_mock_server() -> Result<Option<(MockGmpServer, TempDir, PathBuf)>> {
+    start_mock_server_with_credentials("admin", "admin").await
+}
+
+async fn start_mock_server_with_credentials(
+    username: &str,
+    password: &str,
+) -> Result<Option<(MockGmpServer, TempDir, PathBuf)>> {
     let socket_dir = tempfile::Builder::new().prefix("gvm-cli-").tempdir()?;
     let socket_path = socket_dir.path().join("mock.sock");
     let server = match MockGmpServer::builder()
         .mode(ServerMode::Stateful)
-        .credentials("admin", "admin")
+        .credentials(username, password)
         .unix_socket(&socket_path)
         .build()
         .await
@@ -217,6 +225,39 @@ async fn test_auth_failure() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_authenticated_command_escapes_xml_credentials() -> Result<()> {
+    let Some((server, _dir, socket_path)) = start_mock_server().await? else {
+        return Ok(());
+    };
+    let output = gvm_cli(
+        &socket_path,
+        &[
+            "--gmp-username",
+            "admin",
+            "--gmp-password",
+            "foo&bar<baz>",
+            "-X",
+            "<get_tasks/>",
+        ],
+    )
+    .await?;
+    let history = server.command_history();
+    server.shutdown().await;
+
+    assert_eq!(output.status.code(), Some(1));
+    let auth = history
+        .iter()
+        .find(|record| record.command_name() == "authenticate")
+        .context("missing authenticate command in mock server history")?;
+    let raw_auth = String::from_utf8(auth.raw_xml().to_vec())?;
+    assert!(
+        raw_auth.contains("<password>foo&amp;bar&lt;baz&gt;</password>"),
+        "raw authenticate XML: {raw_auth}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_missing_password_error() -> Result<()> {
     let Some((server, _dir, socket_path)) = start_mock_server().await? else {
         return Ok(());
@@ -250,6 +291,10 @@ async fn test_non_2xx_raw_mode() -> Result<()> {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let stdout = String::from_utf8(output.stdout)?;
+    let response = Response::new(stdout.as_bytes().to_vec());
+    assert!(stdout.contains("<get_tasks_response"), "stdout: {stdout}");
+    assert!(!response.is_success(), "stdout: {stdout}");
     Ok(())
 }
 

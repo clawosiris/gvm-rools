@@ -9,9 +9,12 @@ use clap::{Parser, Subcommand};
 use gvm_connection::{
     GvmConnection, SshAuth, SshConfig, SshConnection, UnixSocketConfig, UnixSocketConnection,
 };
-use gvm_protocol::Response;
+use gvm_gmp::commands::authentication::authenticate as authenticate_command;
+use gvm_gmp::responses::AuthenticateResponse;
+use gvm_protocol::{Request, Response};
 use quick_xml::events::Event;
 use quick_xml::{Reader, Writer};
+use zeroize::Zeroizing;
 
 #[derive(Parser, Debug)]
 #[command(name = "gvm-cli")]
@@ -72,9 +75,13 @@ enum Transport {
         #[arg(long, default_value = "gvm")]
         username: String,
 
-        /// Password authentication (if omitted, SSH agent will be used)
-        #[arg(long)]
+        /// Password authentication (prefer SSH_PASSWORD or --password-prompt to avoid CLI exposure)
+        #[arg(long, env = "SSH_PASSWORD", hide_env_values = true)]
         password: Option<String>,
+
+        /// Prompt for the SSH password from a TTY instead of using SSH agent auth
+        #[arg(long, default_value_t = false, conflicts_with = "password")]
+        password_prompt: bool,
 
         /// Remote gvmd socket path
         #[arg(long, default_value = "/run/gvmd/gvmd.sock")]
@@ -85,7 +92,14 @@ enum Transport {
     Tls {},
 }
 
-fn read_xml(cli: &Cli) -> Result<String> {
+#[derive(Debug, PartialEq, Eq)]
+enum PasswordResolution {
+    None,
+    Provided(String),
+    Prompt(&'static str),
+}
+
+async fn read_xml(cli: &Cli) -> Result<String> {
     if let Some(xml) = &cli.xml {
         return Ok(xml.clone());
     }
@@ -96,16 +110,22 @@ fn read_xml(cli: &Cli) -> Result<String> {
     }
 
     // stdin
+    tokio::task::spawn_blocking(read_stdin_to_string)
+        .await
+        .context("stdin read task failed")?
+        .context("failed to read stdin")
+}
+
+fn read_stdin_to_string() -> std::io::Result<String> {
     let mut buf = String::new();
-    std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
-        .context("failed to read stdin")?;
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)?;
     Ok(buf)
 }
 
 async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
     conn: &mut C,
     username: Option<&str>,
-    password: Option<&str>,
+    password: Option<&Zeroizing<String>>,
     raw: bool,
 ) -> Result<()> {
     let Some(username) = username else {
@@ -115,12 +135,9 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
     let password =
         password.ok_or_else(|| anyhow!("--gmp-password is required when --gmp-username is set"))?;
 
-    let auth_xml = format!(
-        "<authenticate><credentials><username>{}</username><password>{}</password></credentials></authenticate>",
-        username, password
-    );
+    let auth_command = authenticate_command(username, password.as_str());
 
-    conn.send(auth_xml.as_bytes())
+    conn.send(&auth_command.to_bytes())
         .await
         .context("send authenticate failed")?;
     let resp_bytes = conn.read().await.context("read authenticate failed")?;
@@ -130,50 +147,95 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
         return Ok(());
     }
 
-    if !resp.is_success() {
-        let status = resp.status_code().unwrap_or(0);
-        let text = resp
-            .status_text()
-            .unwrap_or_else(|| "<no status text>".to_string());
-        return Err(anyhow!("authentication failed (status {status}): {text}"));
-    }
+    AuthenticateResponse::from_response(&resp)
+        .map_err(|error| anyhow!("authentication failed: {error}"))?;
 
     Ok(())
 }
 
-fn resolve_gmp_password(cli: &Cli) -> Result<Option<String>> {
-    resolve_gmp_password_with(
-        cli,
+async fn resolve_gmp_password(cli: &mut Cli) -> Result<Option<Zeroizing<String>>> {
+    match resolve_gmp_password_with(
+        cli.gmp_username.as_deref(),
+        cli.gmp_password.take(),
         std::io::stdin().is_terminal(),
-        prompt_password_from_tty,
-    )
+    )? {
+        PasswordResolution::None => Ok(None),
+        PasswordResolution::Provided(password) => Ok(Some(Zeroizing::new(password))),
+        PasswordResolution::Prompt(prompt) => {
+            prompt_password(prompt, "failed to read GMP password from TTY")
+                .await
+                .map(Some)
+        }
+    }
 }
 
-fn resolve_gmp_password_with<F>(
-    cli: &Cli,
+fn resolve_gmp_password_with(
+    username: Option<&str>,
+    password: Option<String>,
     stdin_is_terminal: bool,
-    prompt_password: F,
-) -> Result<Option<String>>
-where
-    F: FnOnce(&str) -> std::io::Result<String>,
-{
-    let Some(_) = cli.gmp_username.as_deref() else {
-        return Ok(cli.gmp_password.clone());
+) -> Result<PasswordResolution> {
+    let Some(_) = username else {
+        return Ok(password
+            .map(PasswordResolution::Provided)
+            .unwrap_or(PasswordResolution::None));
     };
 
-    if let Some(password) = &cli.gmp_password {
-        return Ok(Some(password.clone()));
+    if let Some(password) = password {
+        return Ok(PasswordResolution::Provided(password));
     }
 
     if stdin_is_terminal {
-        return prompt_password("GMP Password: ")
-            .map(Some)
-            .context("failed to read GMP password from TTY");
+        return Ok(PasswordResolution::Prompt("GMP Password: "));
     }
 
     Err(anyhow!(
         "--gmp-password is required when --gmp-username is set"
     ))
+}
+
+async fn resolve_ssh_password(
+    password: Option<String>,
+    password_prompt: bool,
+) -> Result<Option<Zeroizing<String>>> {
+    match resolve_ssh_password_with(password, password_prompt, std::io::stdin().is_terminal())? {
+        PasswordResolution::None => Ok(None),
+        PasswordResolution::Provided(password) => Ok(Some(Zeroizing::new(password))),
+        PasswordResolution::Prompt(prompt) => {
+            prompt_password(prompt, "failed to read SSH password from TTY")
+                .await
+                .map(Some)
+        }
+    }
+}
+
+fn resolve_ssh_password_with(
+    password: Option<String>,
+    password_prompt: bool,
+    stdin_is_terminal: bool,
+) -> Result<PasswordResolution> {
+    if let Some(password) = password {
+        return Ok(PasswordResolution::Provided(password));
+    }
+
+    if password_prompt {
+        if stdin_is_terminal {
+            return Ok(PasswordResolution::Prompt("SSH Password: "));
+        }
+
+        return Err(anyhow!(
+            "--password-prompt requires a TTY or use SSH_PASSWORD"
+        ));
+    }
+
+    Ok(PasswordResolution::None)
+}
+
+async fn prompt_password(prompt: &'static str, context: &'static str) -> Result<Zeroizing<String>> {
+    tokio::task::spawn_blocking(move || prompt_password_from_tty(prompt))
+        .await
+        .context("password prompt task failed")?
+        .map(Zeroizing::new)
+        .context(context)
 }
 
 fn prompt_password_from_tty(prompt: &str) -> std::io::Result<String> {
@@ -207,12 +269,12 @@ fn format_xml(xml: &[u8], pretty: bool) -> Result<String> {
     String::from_utf8(writer.into_inner()).context("pretty-printed XML was not valid UTF-8")
 }
 
-async fn run(cli: Cli) -> Result<i32> {
-    let xml = read_xml(&cli)?.trim().to_string();
+async fn run(mut cli: Cli) -> Result<i32> {
+    let xml = read_xml(&cli).await?.trim().to_string();
     if xml.is_empty() {
         return Err(anyhow!("no XML provided (use --xml, infile, or stdin)"));
     }
-    let gmp_password = resolve_gmp_password(&cli)?;
+    let gmp_password = resolve_gmp_password(&mut cli).await?;
 
     let mut conn: Box<dyn GvmConnection> = match cli.transport {
         Transport::Socket { path, timeout } => {
@@ -232,9 +294,13 @@ async fn run(cli: Cli) -> Result<i32> {
             port,
             username,
             password,
+            password_prompt,
             remote_socket,
         } => {
-            let auth = password.map(SshAuth::Password).unwrap_or(SshAuth::Agent);
+            let auth = resolve_ssh_password(password, password_prompt)
+                .await?
+                .map(|password| SshAuth::Password(password.to_string()))
+                .unwrap_or(SshAuth::Agent);
             let cfg = SshConfig::new(hostname, username, auth)
                 .with_port(port)
                 .with_remote_socket(remote_socket);
@@ -252,7 +318,7 @@ async fn run(cli: Cli) -> Result<i32> {
     authenticate_if_needed(
         conn.as_mut(),
         cli.gmp_username.as_deref(),
-        gmp_password.as_deref(),
+        gmp_password.as_ref(),
         cli.raw,
     )
     .await?;
@@ -300,9 +366,11 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Error, ErrorKind};
-
-    use super::{format_xml, resolve_gmp_password_with, Cli, Transport};
+    use super::{
+        authenticate_command, format_xml, resolve_gmp_password_with, resolve_ssh_password_with,
+        Cli, PasswordResolution, Transport,
+    };
+    use gvm_protocol::Request;
 
     fn socket_transport() -> Transport {
         Transport::Socket {
@@ -324,12 +392,11 @@ mod tests {
             transport: socket_transport(),
         };
 
-        let result = resolve_gmp_password_with(&cli, false, |_| {
-            panic!("prompt should not be called when username is unset")
-        })
-        .unwrap();
+        let result =
+            resolve_gmp_password_with(cli.gmp_username.as_deref(), cli.gmp_password, false)
+                .unwrap();
 
-        assert_eq!(result.as_deref(), Some("secret"));
+        assert_eq!(result, PasswordResolution::Provided("secret".to_string()));
     }
 
     #[test]
@@ -346,10 +413,9 @@ mod tests {
         };
 
         let result =
-            resolve_gmp_password_with(&cli, true, |prompt| Ok(format!("from-prompt:{prompt}")))
-                .unwrap();
+            resolve_gmp_password_with(cli.gmp_username.as_deref(), cli.gmp_password, true).unwrap();
 
-        assert_eq!(result.as_deref(), Some("from-prompt:GMP Password: "));
+        assert_eq!(result, PasswordResolution::Prompt("GMP Password: "));
     }
 
     #[test]
@@ -365,10 +431,8 @@ mod tests {
             transport: socket_transport(),
         };
 
-        let error = resolve_gmp_password_with(&cli, false, |_| {
-            panic!("prompt should not be called when stdin is not a TTY")
-        })
-        .unwrap_err();
+        let error = resolve_gmp_password_with(cli.gmp_username.as_deref(), cli.gmp_password, false)
+            .unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -377,26 +441,42 @@ mod tests {
     }
 
     #[test]
-    fn wraps_prompt_errors_with_tty_context() {
-        let cli = Cli {
-            gmp_username: Some("admin".to_string()),
-            gmp_password: None,
-            xml: None,
-            raw: false,
-            pretty: false,
-            duration: false,
-            infile: None,
-            transport: socket_transport(),
-        };
+    fn prefers_supplied_ssh_password_over_agent_auth() {
+        let result =
+            resolve_ssh_password_with(Some("ssh-secret".to_string()), false, false).unwrap();
 
-        let error = resolve_gmp_password_with(&cli, true, |_| {
-            Err(Error::new(ErrorKind::Interrupted, "prompt failed"))
-        })
-        .unwrap_err();
+        assert_eq!(
+            result,
+            PasswordResolution::Provided("ssh-secret".to_string())
+        );
+    }
 
-        assert!(error
-            .to_string()
-            .contains("failed to read GMP password from TTY"));
+    #[test]
+    fn prompts_for_ssh_password_when_requested() {
+        let result = resolve_ssh_password_with(None, true, true).unwrap();
+
+        assert_eq!(result, PasswordResolution::Prompt("SSH Password: "));
+    }
+
+    #[test]
+    fn errors_when_ssh_password_prompt_lacks_tty() {
+        let error = resolve_ssh_password_with(None, true, false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "--password-prompt requires a TTY or use SSH_PASSWORD"
+        );
+    }
+
+    #[test]
+    fn escapes_special_characters_in_auth_xml() {
+        let command = authenticate_command("admin&<>'\"", "foo&bar<baz>'\"");
+        let auth_xml = String::from_utf8(command.to_bytes()).expect("auth xml utf-8");
+
+        assert_eq!(
+            auth_xml,
+            "<authenticate><credentials><username>admin&amp;&lt;&gt;&apos;&quot;</username><password>foo&amp;bar&lt;baz&gt;&apos;&quot;</password></credentials></authenticate>"
+        );
     }
 
     #[test]

@@ -29,7 +29,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           components: rustfmt
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo fmt --all -- --check
 
   clippy:
@@ -46,7 +46,7 @@ jobs:
           fi
 
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test-stable:
@@ -63,7 +63,7 @@ jobs:
           fi
 
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo test --workspace --all-features
 
   msrv:
@@ -80,7 +80,7 @@ jobs:
           fi
 
       - uses: dtolnay/rust-toolchain@1.88.0
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo test --workspace
 
   trigger-e2e:
@@ -93,6 +93,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          gh api repos/clawosiris/rust-gvm-e2e-tests/dispatches \
-            -f event_type=component-updated \
-            -f 'client_payload={"component":"gvm-rools","ref":"${{ github.sha }}"}'
+          gh api --method POST repos/clawosiris/rust-gvm-e2e-tests/dispatches \
+            -F event_type=component-updated \
+            -F client_payload[component]=gvm-rools \
+            -F client_payload[ref]="${{ github.sha }}"

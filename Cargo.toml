@@ -14,12 +14,14 @@ authors = ["Greenbone AG", "clawosiris"]
 
 [workspace.dependencies]
 # CLI
-clap = { version = "4.5", features = ["derive", "env"] }
+clap = { version = "4.6", features = ["derive", "env"] }
 anyhow = "1"
 
 # Async runtime
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 # Underlying library (rust-gvm workspace crates)
-gvm-connection = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.3.0", features = ["ssh"] }
-gvm-protocol = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.3.0" }
+gvm-connection = { git = "https://github.com/clawosiris/rust-gvm.git", branch = "main", features = ["ssh"] }
+gvm-protocol = { git = "https://github.com/clawosiris/rust-gvm.git", branch = "main" }
+gvm-gmp = { git = "https://github.com/clawosiris/rust-gvm.git", branch = "main" }
+
