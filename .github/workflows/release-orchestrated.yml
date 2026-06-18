@@ -220,6 +220,7 @@ jobs:
           VERSION="${{ inputs.version }}"
           TARGET="x86_64-unknown-linux-musl"
           gh release upload "v${VERSION}" \
+            "dist/gvm-cli-v${VERSION}-${TARGET}" \
             "dist/gvm-rools-v${VERSION}-${TARGET}.tar.gz" \
             "dist/gvm-rools_${VERSION}_amd64.deb" \
             "dist/gvm-rools-${VERSION}-1.x86_64.rpm" \

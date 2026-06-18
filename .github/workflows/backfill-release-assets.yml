@@ -73,11 +73,6 @@ jobs:
         run: |
           chmod +x scripts/build-release-artifacts.sh
           scripts/build-release-artifacts.sh "${VERSION}"
-          cp "target/${TARGET}/release/gvm-cli" "dist/gvm-cli-v${VERSION}-${TARGET}"
-          (
-            cd dist
-            sha256sum "gvm-cli-v${VERSION}-${TARGET}" >> SHA256SUMS
-          )
 
       - name: Upload assets to existing release
         env:
