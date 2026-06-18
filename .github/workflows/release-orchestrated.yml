@@ -43,9 +43,11 @@ jobs:
           if [[ "$VERSION" != *"-"* ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
+            sed -i "s|tag = \"v[^\"]*\"|branch = \"main\"|g" Cargo.toml
             sed -i "s|branch = \"main\"|tag = \"v$VERSION\"|g" Cargo.toml
             git add Cargo.toml
             git commit -m "build(deps): pin rust-gvm to v$VERSION" || true
+            git pull --rebase origin "${GITHUB_REF_NAME:-main}"
             git push
           else
             echo "Pre-release: keeping branch = main"
