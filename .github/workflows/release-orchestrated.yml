@@ -66,12 +66,18 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           if [[ "$VERSION" != *"-"* ]]; then
+            UPSTREAM_TAG="$(gh api repos/clawosiris/rust-gvm/tags --jq '[.[].name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first')"
+            if [[ -z "${UPSTREAM_TAG}" || "${UPSTREAM_TAG}" == "null" ]]; then
+              echo "No stable rust-gvm tag found" >&2
+              exit 1
+            fi
+            echo "Pinning rust-gvm dependencies to ${UPSTREAM_TAG}"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            sed -i "s|tag = \"v[^\"]*\"|branch = \"main\"|g" Cargo.toml
-            sed -i "s|branch = \"main\"|tag = \"v$VERSION\"|g" Cargo.toml
-            git add Cargo.toml
-            git commit -m "build(deps): pin rust-gvm to v$VERSION" || true
+            sed -i "s|tag = \"v[^\"]*\"|tag = \"${UPSTREAM_TAG}\"|g" Cargo.toml crates/gvm-rools-cli/Cargo.toml
+            sed -i "s|branch = \"main\"|tag = \"${UPSTREAM_TAG}\"|g" Cargo.toml crates/gvm-rools-cli/Cargo.toml
+            git add Cargo.toml crates/gvm-rools-cli/Cargo.toml
+            git commit -m "build(deps): pin rust-gvm to ${UPSTREAM_TAG}" || true
             git pull --rebase origin "${GITHUB_REF_NAME:-main}"
             git push
           else
@@ -79,6 +85,7 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
       - name: Create release
         uses: greenbone/actions/release@v3
         with:
@@ -210,7 +217,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "v${{ inputs.version }}" dist/* --clobber
+          VERSION="${{ inputs.version }}"
+          TARGET="x86_64-unknown-linux-musl"
+          gh release upload "v${VERSION}" \
+            "dist/gvm-rools-v${VERSION}-${TARGET}.tar.gz" \
+            "dist/gvm-rools_${VERSION}_amd64.deb" \
+            "dist/gvm-rools-${VERSION}-1.x86_64.rpm" \
+            "dist/gvm-rools-${VERSION}-1-x86_64.pkg.tar.zst" \
+            "dist/SHA256SUMS" \
+            --clobber
 
   collect:
     name: Release complete
