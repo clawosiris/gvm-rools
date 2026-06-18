@@ -44,6 +44,10 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     duration: bool,
 
+    /// Print connection and protocol details to stderr
+    #[arg(long, default_value_t = false)]
+    verbose: bool,
+
     /// File to read XML commands from (if --xml not provided)
     infile: Option<PathBuf>,
 
@@ -97,6 +101,42 @@ enum PasswordResolution {
     None,
     Provided(String),
     Prompt(&'static str),
+}
+
+fn verbose_log(enabled: bool, message: impl AsRef<str>) {
+    if enabled {
+        eprintln!("[verbose] {}", message.as_ref());
+    }
+}
+
+impl Transport {
+    fn describe(&self) -> String {
+        match self {
+            Self::Socket { path, timeout } => {
+                format!("unix socket path={} timeout={}s", path.display(), timeout)
+            }
+            Self::Ssh {
+                hostname,
+                port,
+                username,
+                password,
+                password_prompt,
+                remote_socket,
+            } => {
+                let auth = if password.is_some() {
+                    "password"
+                } else if *password_prompt {
+                    "password-prompt"
+                } else {
+                    "ssh-agent"
+                };
+                format!(
+                    "ssh host={hostname} port={port} user={username} remote_socket={remote_socket} auth={auth}"
+                )
+            }
+            Self::Tls {} => "tls".to_string(),
+        }
+    }
 }
 
 async fn read_xml(cli: &Cli) -> Result<String> {
@@ -274,6 +314,12 @@ async fn run(mut cli: Cli) -> Result<i32> {
     if xml.is_empty() {
         return Err(anyhow!("no XML provided (use --xml, infile, or stdin)"));
     }
+    verbose_log(
+        cli.verbose,
+        format!("transport: {}", cli.transport.describe()),
+    );
+    verbose_log(cli.verbose, format!("request bytes: {}", xml.len()));
+    verbose_log(cli.verbose, format!("request xml:\n{xml}"));
     let gmp_password = resolve_gmp_password(&mut cli).await?;
 
     let mut conn: Box<dyn GvmConnection> = match cli.transport {
@@ -313,8 +359,16 @@ async fn run(mut cli: Cli) -> Result<i32> {
         }
     };
 
+    verbose_log(cli.verbose, "connecting");
     conn.connect().await.context("connect failed")?;
+    verbose_log(cli.verbose, "connected");
 
+    if let Some(username) = cli.gmp_username.as_deref() {
+        verbose_log(
+            cli.verbose,
+            format!("authenticating as GMP user {username}"),
+        );
+    }
     authenticate_if_needed(
         conn.as_mut(),
         cli.gmp_username.as_deref(),
@@ -324,9 +378,20 @@ async fn run(mut cli: Cli) -> Result<i32> {
     .await?;
 
     let start = Instant::now();
+    verbose_log(cli.verbose, "sending request");
     conn.send(xml.as_bytes()).await.context("send failed")?;
+    verbose_log(cli.verbose, "waiting for response");
     let resp_bytes = conn.read().await.context("read failed")?;
     let elapsed = start.elapsed();
+    verbose_log(cli.verbose, format!("response bytes: {}", resp_bytes.len()));
+    verbose_log(
+        cli.verbose,
+        format!("response xml:\n{}", String::from_utf8_lossy(&resp_bytes)),
+    );
+    verbose_log(
+        cli.verbose,
+        format!("round-trip time: {:.3} seconds", elapsed.as_secs_f64()),
+    );
 
     let resp = Response::new(resp_bytes);
 
@@ -347,7 +412,9 @@ async fn run(mut cli: Cli) -> Result<i32> {
         eprintln!("Elapsed time: {:.3} seconds", elapsed.as_secs_f64());
     }
 
+    verbose_log(cli.verbose, "disconnecting");
     conn.disconnect().await.ok();
+    verbose_log(cli.verbose, "disconnected");
 
     Ok(0)
 }
@@ -388,6 +455,7 @@ mod tests {
             raw: false,
             pretty: false,
             duration: false,
+            verbose: false,
             infile: None,
             transport: socket_transport(),
         };
@@ -408,6 +476,7 @@ mod tests {
             raw: false,
             pretty: false,
             duration: false,
+            verbose: false,
             infile: None,
             transport: socket_transport(),
         };
@@ -427,6 +496,7 @@ mod tests {
             raw: false,
             pretty: false,
             duration: false,
+            verbose: false,
             infile: None,
             transport: socket_transport(),
         };
