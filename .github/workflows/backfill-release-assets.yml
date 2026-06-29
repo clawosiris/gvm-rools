@@ -19,7 +19,7 @@ jobs:
     name: "Backfill v${{ inputs.version }} assets"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         with:
           ref: v${{ inputs.version }}
           fetch-depth: 0
@@ -53,7 +53,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
 
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: stable
 
