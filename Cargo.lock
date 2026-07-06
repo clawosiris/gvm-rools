@@ -917,7 +917,7 @@ source = "git+https://github.com/clawosiris/rust-gvm.git?tag=v0.3.3#20dbeedd0a06
 dependencies = [
  "base64",
  "gvm-protocol",
- "quick-xml",
+ "quick-xml 0.39.4",
  "thiserror",
 ]
 
@@ -929,7 +929,7 @@ dependencies = [
  "clap",
  "getrandom 0.2.17",
  "gvm-protocol",
- "quick-xml",
+ "quick-xml 0.39.4",
  "russh",
  "tempfile",
  "tokio",
@@ -943,7 +943,7 @@ name = "gvm-protocol"
 version = "0.3.3"
 source = "git+https://github.com/clawosiris/rust-gvm.git?tag=v0.3.3#20dbeedd0a06c08e86489307e6bba761392978fd"
 dependencies = [
- "quick-xml",
+ "quick-xml 0.39.4",
  "thiserror",
 ]
 
@@ -958,7 +958,7 @@ dependencies = [
  "gvm-gmp",
  "gvm-mock-server",
  "gvm-protocol",
- "quick-xml",
+ "quick-xml 0.41.0",
  "rpassword",
  "tempfile",
  "tokio",
@@ -1522,6 +1522,15 @@ checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
 dependencies = [
  "memchr",
  "serde",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
