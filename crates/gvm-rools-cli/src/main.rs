@@ -21,31 +21,31 @@ use zeroize::Zeroizing;
 #[command(about = "Rust reimplementation of gvm-tools gvm-cli (GMP only)", long_about = None)]
 struct Cli {
     /// GMP username (optional; if provided, gvm-cli will authenticate before sending the command)
-    #[arg(long, env = "GMP_USERNAME")]
+    #[arg(long, env = "GMP_USERNAME", global = true)]
     gmp_username: Option<String>,
 
     /// GMP password (optional; if omitted but username is provided, gvm-cli will prompt)
-    #[arg(long, env = "GMP_PASSWORD")]
+    #[arg(long, env = "GMP_PASSWORD", global = true)]
     gmp_password: Option<String>,
 
     /// XML request to send (if omitted, read from infile or stdin)
-    #[arg(short = 'X', long)]
+    #[arg(short = 'X', long, global = true)]
     xml: Option<String>,
 
     /// Return raw XML even for non-2xx responses (do not treat as error)
-    #[arg(short = 'r', long, default_value_t = false)]
+    #[arg(short = 'r', long, default_value_t = false, global = true)]
     raw: bool,
 
     /// Pretty format the returned XML
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, global = true)]
     pretty: bool,
 
     /// Measure command execution time
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, global = true)]
     duration: bool,
 
     /// Print connection and protocol details to stderr
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, global = true)]
     verbose: bool,
 
     /// File to read XML commands from (if --xml not provided)
@@ -437,6 +437,7 @@ mod tests {
         authenticate_command, format_xml, resolve_gmp_password_with, resolve_ssh_password_with,
         Cli, PasswordResolution, Transport,
     };
+    use clap::Parser;
     use gvm_protocol::Request;
 
     fn socket_transport() -> Transport {
@@ -560,5 +561,21 @@ mod tests {
         let original = "<root><child>value</child></root>";
         let formatted = format_xml(original.as_bytes(), false).unwrap();
         assert_eq!(formatted, original);
+    }
+
+    #[test]
+    fn parses_global_xml_flag_after_transport_subcommand() {
+        let cli = Cli::try_parse_from([
+            "gvm-cli",
+            "socket",
+            "--path",
+            "/tmp/gvmd.sock",
+            "-X",
+            "<get_version/>",
+        ])
+        .expect("cli should parse");
+
+        assert_eq!(cli.xml.as_deref(), Some("<get_version/>"));
+        assert!(matches!(cli.transport, Transport::Socket { .. }));
     }
 }

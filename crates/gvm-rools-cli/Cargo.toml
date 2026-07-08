@@ -19,7 +19,7 @@ tokio.workspace = true
 gvm-connection.workspace = true
 gvm-protocol.workspace = true
 gvm-gmp.workspace = true
-quick-xml = "0.39"
+quick-xml = "0.41"
 rpassword = "7"
 zeroize = "1"
 
@@ -29,4 +29,4 @@ tempfile = "3"
 
 # Test server from rust-gvm
 # (Used for CLI integration tests; feature enables SSH listener for future tests)
-gvm-mock-server = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.3.3", features = ["ssh"] }
+gvm-mock-server = { git = "https://github.com/clawosiris/rust-gvm.git", rev = "e39f3a412c9752b7972fee714da5976b4ebd1341", features = ["ssh"] }

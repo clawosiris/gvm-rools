@@ -21,6 +21,6 @@ anyhow = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 # Underlying library (rust-gvm workspace crates)
-gvm-connection = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.3.3", features = ["ssh"] }
-gvm-protocol = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.3.3" }
-gvm-gmp = { git = "https://github.com/clawosiris/rust-gvm.git", tag = "v0.3.3" }
+gvm-connection = { git = "https://github.com/clawosiris/rust-gvm.git", rev = "e39f3a412c9752b7972fee714da5976b4ebd1341", features = ["ssh"] }
+gvm-protocol = { git = "https://github.com/clawosiris/rust-gvm.git", rev = "e39f3a412c9752b7972fee714da5976b4ebd1341" }
+gvm-gmp = { git = "https://github.com/clawosiris/rust-gvm.git", rev = "e39f3a412c9752b7972fee714da5976b4ebd1341" }
