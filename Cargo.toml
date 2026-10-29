@@ -7,7 +7,7 @@ members = [
 [workspace.package]
 version = "0.3.3"
 edition = "2021"
-rust-version = "1.88.0"
+rust-version = "1.89.0"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/clawosiris/gvm-rools"
 authors = ["Greenbone AG", "clawosiris"]
@@ -21,6 +21,6 @@ anyhow = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 # Underlying library (rust-gvm workspace crates)
-gvm-connection = { git = "https://github.com/clawosiris/rust-gvm.git", rev = "e39f3a412c9752b7972fee714da5976b4ebd1341", features = ["ssh"] }
-gvm-protocol = { git = "https://github.com/clawosiris/rust-gvm.git", rev = "e39f3a412c9752b7972fee714da5976b4ebd1341" }
-gvm-gmp = { git = "https://github.com/clawosiris/rust-gvm.git", rev = "e39f3a412c9752b7972fee714da5976b4ebd1341" }
+gvm-connection = { git = "https://github.com/greenbone-hive/rust-gvm.git", rev = "f20a01f7297060f02b6f577bba7261cacb585fc3", features = ["ssh"] }
+gvm-protocol = { git = "https://github.com/greenbone-hive/rust-gvm.git", rev = "f20a01f7297060f02b6f577bba7261cacb585fc3" }
+gvm-gmp = { git = "https://github.com/greenbone-hive/rust-gvm.git", rev = "f20a01f7297060f02b6f577bba7261cacb585fc3" }

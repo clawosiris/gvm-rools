@@ -62,30 +62,6 @@ jobs:
           }' "$RUNNER_TEMP/main-protection-raw.json" > "$RUNNER_TEMP/main-protection.json"
           gh api --method DELETE repos/${{ github.repository }}/branches/main/protection/required_status_checks || true
           gh api --method DELETE repos/${{ github.repository }}/branches/main/protection/required_pull_request_reviews || true
-      - name: Pin upstream dependencies
-        run: |
-          VERSION="${{ inputs.version }}"
-          if [[ "$VERSION" != *"-"* ]]; then
-            UPSTREAM_TAG="$(gh api repos/clawosiris/rust-gvm/tags --jq '[.[].name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first')"
-            if [[ -z "${UPSTREAM_TAG}" || "${UPSTREAM_TAG}" == "null" ]]; then
-              echo "No stable rust-gvm tag found" >&2
-              exit 1
-            fi
-            echo "Pinning rust-gvm dependencies to ${UPSTREAM_TAG}"
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            sed -i "s|tag = \"v[^\"]*\"|tag = \"${UPSTREAM_TAG}\"|g" Cargo.toml crates/gvm-rools-cli/Cargo.toml
-            sed -i "s|branch = \"main\"|tag = \"${UPSTREAM_TAG}\"|g" Cargo.toml crates/gvm-rools-cli/Cargo.toml
-            git add Cargo.toml crates/gvm-rools-cli/Cargo.toml
-            git commit -m "build(deps): pin rust-gvm to ${UPSTREAM_TAG}" || true
-            git pull --rebase origin "${GITHUB_REF_NAME:-main}"
-            git push
-          else
-            echo "Pre-release: keeping branch = main"
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
       - name: Create release
         uses: greenbone/actions/release@v3
         with:
