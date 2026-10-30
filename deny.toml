@@ -2,12 +2,7 @@
 # See: https://embarkstudios.github.io/cargo-deny/
 
 [advisories]
-ignore = [
-    # rsa crate Marvin Attack — transitive via russh; no fix available yet in russh dependency tree
-    "RUSTSEC-2023-0071",
-    # rustls-pemfile unmaintained — workspace dep for TLS feature; will migrate when rustls ecosystem settles
-    "RUSTSEC-2025-0134",
-]
+ignore = []
 
 [licenses]
 allow = [
@@ -36,4 +31,4 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []
-allow-org = { github = ["clawosiris"] }
+allow-org = { github = ["greenbone-hive"] }

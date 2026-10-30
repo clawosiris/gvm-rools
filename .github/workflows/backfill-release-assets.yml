@@ -33,20 +33,6 @@ jobs:
             exit 1
           fi
 
-      - name: Normalize rust-gvm refs for tagged rebuilds
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          UPSTREAM_TAG="$(gh api repos/clawosiris/rust-gvm/tags --jq '[.[].name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first')"
-          if [[ -z "${UPSTREAM_TAG}" || "${UPSTREAM_TAG}" == "null" ]]; then
-            echo "No stable rust-gvm tag found" >&2
-            exit 1
-          fi
-          echo "Pinning rust-gvm dependencies to ${UPSTREAM_TAG}"
-          sed -i "s|tag = \"v[^\"]*\"|tag = \"${UPSTREAM_TAG}\"|g" Cargo.toml crates/gvm-rools-cli/Cargo.toml
-          sed -i "s|branch = \"main\"|tag = \"${UPSTREAM_TAG}\"|g" Cargo.toml crates/gvm-rools-cli/Cargo.toml
-          cargo generate-lockfile
-
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           targets: x86_64-unknown-linux-musl

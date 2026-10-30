@@ -225,6 +225,38 @@ async fn test_auth_failure() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_raw_mode_preserves_authentication_response_behavior() -> Result<()> {
+    let Some((server, _dir, socket_path)) = start_mock_server().await? else {
+        return Ok(());
+    };
+    let output = gvm_cli(
+        &socket_path,
+        &[
+            "--raw",
+            "--gmp-username",
+            "admin",
+            "--gmp-password",
+            "wrong",
+            "-X",
+            "<get_tasks/>",
+        ],
+    )
+    .await?;
+    server.shutdown().await;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8(output.stdout)?.contains("<get_tasks_response"),
+        "raw mode should return the command response"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_authenticated_command_escapes_xml_credentials() -> Result<()> {
     let Some((server, _dir, socket_path)) = start_mock_server().await? else {
         return Ok(());

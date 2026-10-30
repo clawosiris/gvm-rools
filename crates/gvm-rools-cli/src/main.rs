@@ -9,9 +9,10 @@ use clap::{Parser, Subcommand};
 use gvm_connection::{
     GvmConnection, SshAuth, SshConfig, SshConnection, UnixSocketConfig, UnixSocketConnection,
 };
-use gvm_gmp::commands::authentication::authenticate as authenticate_command;
+use gvm_gmp::commands::authentication::AuthenticateRequest;
 use gvm_gmp::responses::AuthenticateResponse;
-use gvm_protocol::{Request, Response};
+use gvm_gmp::{GmpRequestCodec, GmpVersion};
+use gvm_protocol::Response;
 use quick_xml::events::Event;
 use quick_xml::{Reader, Writer};
 use zeroize::Zeroizing;
@@ -103,6 +104,8 @@ enum PasswordResolution {
     Prompt(&'static str),
 }
 
+const GMP_PROFILE: GmpVersion = GmpVersion(22, 8);
+
 fn verbose_log(enabled: bool, message: impl AsRef<str>) {
     if enabled {
         eprintln!("[verbose] {}", message.as_ref());
@@ -175,9 +178,13 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
     let password =
         password.ok_or_else(|| anyhow!("--gmp-password is required when --gmp-username is set"))?;
 
-    let auth_command = authenticate_command(username, password.as_str());
+    let auth_command = Zeroizing::new(
+        AuthenticateRequest::new(username, password.as_str())
+            .encode(GMP_PROFILE)
+            .context("encode authenticate failed")?,
+    );
 
-    conn.send(&auth_command.to_bytes())
+    conn.send(auth_command.as_slice())
         .await
         .context("send authenticate failed")?;
     let resp_bytes = conn.read().await.context("read authenticate failed")?;
@@ -434,11 +441,12 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        authenticate_command, format_xml, resolve_gmp_password_with, resolve_ssh_password_with,
-        Cli, PasswordResolution, Transport,
+        format_xml, resolve_gmp_password_with, resolve_ssh_password_with, Cli, PasswordResolution,
+        Transport, GMP_PROFILE,
     };
     use clap::Parser;
-    use gvm_protocol::Request;
+    use gvm_gmp::commands::authentication::AuthenticateRequest;
+    use gvm_gmp::GmpRequestCodec;
 
     fn socket_transport() -> Transport {
         Transport::Socket {
@@ -541,13 +549,27 @@ mod tests {
 
     #[test]
     fn escapes_special_characters_in_auth_xml() {
-        let command = authenticate_command("admin&<>'\"", "foo&bar<baz>'\"");
-        let auth_xml = String::from_utf8(command.to_bytes()).expect("auth xml utf-8");
+        let request = AuthenticateRequest::new("admin&<>'\"", "foo&bar<baz>'\"");
+        let auth_xml = String::from_utf8(request.encode(GMP_PROFILE).expect("valid auth request"))
+            .expect("auth xml utf-8");
 
         assert_eq!(
             auth_xml,
             "<authenticate><credentials><username>admin&amp;&lt;&gt;&apos;&quot;</username><password>foo&amp;bar&lt;baz&gt;&apos;&quot;</password></credentials></authenticate>"
         );
+    }
+
+    #[test]
+    fn authentication_encoding_errors_redact_credentials() {
+        let request = AuthenticateRequest::new("admin", "secret\0value");
+        let error = request
+            .encode(GMP_PROFILE)
+            .expect_err("invalid XML character must be rejected");
+        let message = error.to_string();
+
+        assert!(message.contains("password"));
+        assert!(!message.contains("secret"));
+        assert!(!format!("{request:?}").contains("secret"));
     }
 
     #[test]

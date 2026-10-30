@@ -12,6 +12,8 @@
 
 Rust reimplementation of [`greenbone/gvm-tools`](https://github.com/greenbone/gvm-tools), built on top of the **rust-gvm** library crates.
 
+Development and source builds require Rust 1.89 or newer. Production dependencies use the immutable rust-gvm v0.8.0 release commit; CI separately checks compatibility with current rust-gvm `main`.
+
 ## Scope (initial)
 
 We are focusing first on **`gvm-cli`** (GMP only):
