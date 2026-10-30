@@ -14,7 +14,7 @@ We support the latest minor release with security patches. Once a new minor or m
 
 Instead, use **GitHub Private Vulnerability Reporting**:
 
-1. Go to the [Security Advisories](https://github.com/clawosiris/rust-gvm/security/advisories) tab
+1. Go to the [Security Advisories](https://github.com/greenbone-hive/rust-gvm/security/advisories) tab
 2. Click **"Report a vulnerability"**
 3. Fill in the details — affected crate(s), reproduction steps, and impact assessment
 
@@ -55,12 +55,7 @@ Alternatively, contact the maintainers directly at: **[maintainer email / Signal
 
 ### Known Advisory Exceptions
 
-Accepted advisories are documented in [`deny.toml`](deny.toml) with rationale:
-
-| Advisory | Crate | Reason |
-|----------|-------|--------|
-| RUSTSEC-2023-0071 | `rsa` | Transitive via `russh`; Marvin attack requires RSA key exchange — mitigated by preferring Ed25519/ECDSA keys |
-| RUSTSEC-2025-0134 | `rustls-pemfile` | Unmaintained; will migrate when `rustls` ecosystem provides replacement |
+No advisories in the current dependency graph are ignored. Any future exception must be documented in [`deny.toml`](deny.toml) with its rationale and tracking issue.
 
 ### Supply Chain
 
@@ -73,7 +68,7 @@ Accepted advisories are documented in [`deny.toml`](deny.toml) with rationale:
 
 - `cargo clippy` with `-D warnings` in CI
 - `#[deny(unsafe_code)]` — no unsafe blocks in any crate
-- MSRV tested (currently Rust 1.75.0)
+- MSRV tested (currently Rust 1.89.0)
 - All XML parsing uses `quick-xml` with default limits (no unbounded expansion)
 
 ## Security-Relevant Architecture
