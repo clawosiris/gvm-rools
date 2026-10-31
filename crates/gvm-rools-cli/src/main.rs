@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -34,19 +34,19 @@ struct Cli {
     xml: Option<String>,
 
     /// Return raw XML even for non-2xx responses (do not treat as error)
-    #[arg(short = 'r', long, default_value_t = false, global = true)]
+    #[arg(short = 'r', long, global = true)]
     raw: bool,
 
     /// Pretty format the returned XML
-    #[arg(long, default_value_t = false, global = true)]
+    #[arg(long, global = true)]
     pretty: bool,
 
-    /// Measure command execution time
-    #[arg(long, default_value_t = false, global = true)]
+    /// Measure request/response round-trip time (excludes connection and authentication)
+    #[arg(long, global = true)]
     duration: bool,
 
     /// Print connection and protocol details to stderr
-    #[arg(long, default_value_t = false, global = true)]
+    #[arg(long, global = true)]
     verbose: bool,
 
     /// File to read XML commands from (if --xml not provided)
@@ -85,7 +85,7 @@ enum Transport {
         password: Option<String>,
 
         /// Prompt for the SSH password from a TTY instead of using SSH agent auth
-        #[arg(long, default_value_t = false, conflicts_with = "password")]
+        #[arg(long, conflicts_with = "password")]
         password_prompt: bool,
 
         /// Remote gvmd socket path
@@ -94,7 +94,7 @@ enum Transport {
     },
 
     /// TLS transport (not yet implemented in rust-gvm)
-    Tls {},
+    Tls,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -102,6 +102,17 @@ enum PasswordResolution {
     None,
     Provided(String),
     Prompt(&'static str),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RequiredPasswordResolution {
+    Provided(String),
+    Prompt(&'static str),
+}
+
+struct GmpCredentials {
+    username: String,
+    password: Zeroizing<String>,
 }
 
 const GMP_PROFILE: GmpVersion = GmpVersion(22, 8);
@@ -137,7 +148,7 @@ impl Transport {
                     "ssh host={hostname} port={port} user={username} remote_socket={remote_socket} auth={auth}"
                 )
             }
-            Self::Tls {} => "tls".to_string(),
+            Self::Tls => "tls".to_string(),
         }
     }
 }
@@ -167,19 +178,15 @@ fn read_stdin_to_string() -> std::io::Result<String> {
 
 async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
     conn: &mut C,
-    username: Option<&str>,
-    password: Option<&Zeroizing<String>>,
+    credentials: Option<&GmpCredentials>,
     raw: bool,
 ) -> Result<()> {
-    let Some(username) = username else {
+    let Some(credentials) = credentials else {
         return Ok(());
     };
 
-    let password =
-        password.ok_or_else(|| anyhow!("--gmp-password is required when --gmp-username is set"))?;
-
     let auth_command = Zeroizing::new(
-        AuthenticateRequest::new(username, password.as_str())
+        AuthenticateRequest::new(&credentials.username, credentials.password.as_str())
             .encode(GMP_PROFILE)
             .context("encode authenticate failed")?,
     );
@@ -200,39 +207,35 @@ async fn authenticate_if_needed<C: GvmConnection + ?Sized>(
     Ok(())
 }
 
-async fn resolve_gmp_password(cli: &mut Cli) -> Result<Option<Zeroizing<String>>> {
-    match resolve_gmp_password_with(
-        cli.gmp_username.as_deref(),
+async fn resolve_gmp_credentials(cli: &mut Cli) -> Result<Option<GmpCredentials>> {
+    let Some(username) = cli.gmp_username.take() else {
+        let _unused_password = cli.gmp_password.take().map(Zeroizing::new);
+        return Ok(None);
+    };
+
+    let password = match resolve_required_gmp_password_with(
         cli.gmp_password.take(),
         std::io::stdin().is_terminal(),
     )? {
-        PasswordResolution::None => Ok(None),
-        PasswordResolution::Provided(password) => Ok(Some(Zeroizing::new(password))),
-        PasswordResolution::Prompt(prompt) => {
-            prompt_password(prompt, "failed to read GMP password from TTY")
-                .await
-                .map(Some)
+        RequiredPasswordResolution::Provided(password) => Zeroizing::new(password),
+        RequiredPasswordResolution::Prompt(prompt) => {
+            prompt_password(prompt, "failed to read GMP password from TTY").await?
         }
-    }
-}
-
-fn resolve_gmp_password_with(
-    username: Option<&str>,
-    password: Option<String>,
-    stdin_is_terminal: bool,
-) -> Result<PasswordResolution> {
-    let Some(_) = username else {
-        return Ok(password
-            .map(PasswordResolution::Provided)
-            .unwrap_or(PasswordResolution::None));
     };
 
+    Ok(Some(GmpCredentials { username, password }))
+}
+
+fn resolve_required_gmp_password_with(
+    password: Option<String>,
+    stdin_is_terminal: bool,
+) -> Result<RequiredPasswordResolution> {
     if let Some(password) = password {
-        return Ok(PasswordResolution::Provided(password));
+        return Ok(RequiredPasswordResolution::Provided(password));
     }
 
     if stdin_is_terminal {
-        return Ok(PasswordResolution::Prompt("GMP Password: "));
+        return Ok(RequiredPasswordResolution::Prompt("GMP Password: "));
     }
 
     Err(anyhow!(
@@ -289,9 +292,17 @@ fn prompt_password_from_tty(prompt: &str) -> std::io::Result<String> {
     rpassword::prompt_password(prompt)
 }
 
-fn format_xml(xml: &[u8], pretty: bool) -> Result<String> {
+fn socket_timeout(timeout: i64) -> Option<std::time::Duration> {
+    if timeout < 0 {
+        None
+    } else {
+        Some(std::time::Duration::from_secs(timeout as u64))
+    }
+}
+
+fn format_xml(xml: &[u8], pretty: bool) -> Result<Vec<u8>> {
     if !pretty {
-        return Ok(String::from_utf8_lossy(xml).into_owned());
+        return Ok(xml.to_vec());
     }
 
     let mut reader = Reader::from_reader(xml);
@@ -313,7 +324,16 @@ fn format_xml(xml: &[u8], pretty: bool) -> Result<String> {
         buffer.clear();
     }
 
-    String::from_utf8(writer.into_inner()).context("pretty-printed XML was not valid UTF-8")
+    let formatted = writer.into_inner();
+    std::str::from_utf8(&formatted).context("pretty-printed XML was not valid UTF-8")?;
+    Ok(formatted)
+}
+
+fn write_stdout(response: &[u8]) -> Result<()> {
+    std::io::stdout()
+        .lock()
+        .write_all(response)
+        .context("failed to write response to stdout")
 }
 
 async fn run(mut cli: Cli) -> Result<i32> {
@@ -327,17 +347,12 @@ async fn run(mut cli: Cli) -> Result<i32> {
     );
     verbose_log(cli.verbose, format!("request bytes: {}", xml.len()));
     verbose_log(cli.verbose, format!("request xml:\n{xml}"));
-    let gmp_password = resolve_gmp_password(&mut cli).await?;
+    let gmp_credentials = resolve_gmp_credentials(&mut cli).await?;
 
     let mut conn: Box<dyn GvmConnection> = match cli.transport {
         Transport::Socket { path, timeout } => {
-            let timeout = if timeout < 0 {
-                None
-            } else {
-                Some(std::time::Duration::from_secs(timeout as u64))
-            };
             let mut cfg = UnixSocketConfig::new(path);
-            if let Some(t) = timeout {
+            if let Some(t) = socket_timeout(timeout) {
                 cfg = cfg.with_timeout(t);
             }
             Box::new(UnixSocketConnection::new(cfg))
@@ -359,7 +374,7 @@ async fn run(mut cli: Cli) -> Result<i32> {
                 .with_remote_socket(remote_socket);
             Box::new(SshConnection::new(cfg))
         }
-        Transport::Tls {} => {
+        Transport::Tls => {
             return Err(anyhow!(
                 "TLS transport not implemented yet (see rust-gvm TLS transport issue)"
             ));
@@ -370,60 +385,59 @@ async fn run(mut cli: Cli) -> Result<i32> {
     conn.connect().await.context("connect failed")?;
     verbose_log(cli.verbose, "connected");
 
-    if let Some(username) = cli.gmp_username.as_deref() {
+    let execution_result = async {
+        if let Some(credentials) = &gmp_credentials {
+            verbose_log(
+                cli.verbose,
+                format!("authenticating as GMP user {}", credentials.username),
+            );
+        }
+        authenticate_if_needed(conn.as_mut(), gmp_credentials.as_ref(), cli.raw).await?;
+
+        let start = Instant::now();
+        verbose_log(cli.verbose, "sending request");
+        conn.send(xml.as_bytes()).await.context("send failed")?;
+        verbose_log(cli.verbose, "waiting for response");
+        let resp_bytes = conn.read().await.context("read failed")?;
+        let elapsed = start.elapsed();
+        verbose_log(cli.verbose, format!("response bytes: {}", resp_bytes.len()));
         verbose_log(
             cli.verbose,
-            format!("authenticating as GMP user {username}"),
+            format!("response xml:\n{}", String::from_utf8_lossy(&resp_bytes)),
         );
+        verbose_log(
+            cli.verbose,
+            format!("round-trip time: {:.3} seconds", elapsed.as_secs_f64()),
+        );
+
+        let resp = Response::new(resp_bytes);
+
+        if !cli.raw && !resp.is_success() {
+            let status = resp.status_code().unwrap_or(0);
+            let text = resp
+                .status_text()
+                .unwrap_or_else(|| "<no status text>".to_string());
+            eprintln!("server rejected command (status {status}): {text}");
+            // Still print the response to stdout for debugging.
+            write_stdout(&format_xml(resp.as_ref(), cli.pretty)?)?;
+            return Ok(1);
+        }
+
+        write_stdout(&format_xml(resp.as_ref(), cli.pretty)?)?;
+
+        if cli.duration {
+            eprintln!("Elapsed time: {:.3} seconds", elapsed.as_secs_f64());
+        }
+
+        Ok(0)
     }
-    authenticate_if_needed(
-        conn.as_mut(),
-        cli.gmp_username.as_deref(),
-        gmp_password.as_ref(),
-        cli.raw,
-    )
-    .await?;
-
-    let start = Instant::now();
-    verbose_log(cli.verbose, "sending request");
-    conn.send(xml.as_bytes()).await.context("send failed")?;
-    verbose_log(cli.verbose, "waiting for response");
-    let resp_bytes = conn.read().await.context("read failed")?;
-    let elapsed = start.elapsed();
-    verbose_log(cli.verbose, format!("response bytes: {}", resp_bytes.len()));
-    verbose_log(
-        cli.verbose,
-        format!("response xml:\n{}", String::from_utf8_lossy(&resp_bytes)),
-    );
-    verbose_log(
-        cli.verbose,
-        format!("round-trip time: {:.3} seconds", elapsed.as_secs_f64()),
-    );
-
-    let resp = Response::new(resp_bytes);
-
-    if !cli.raw && !resp.is_success() {
-        let status = resp.status_code().unwrap_or(0);
-        let text = resp
-            .status_text()
-            .unwrap_or_else(|| "<no status text>".to_string());
-        eprintln!("server rejected command (status {status}): {text}");
-        // Still print the response to stdout for debugging.
-        print!("{}", format_xml(resp.as_ref(), cli.pretty)?);
-        return Ok(1);
-    }
-
-    print!("{}", format_xml(resp.as_ref(), cli.pretty)?);
-
-    if cli.duration {
-        eprintln!("Elapsed time: {:.3} seconds", elapsed.as_secs_f64());
-    }
+    .await;
 
     verbose_log(cli.verbose, "disconnecting");
     conn.disconnect().await.ok();
     verbose_log(cli.verbose, "disconnected");
 
-    Ok(0)
+    execution_result
 }
 
 #[tokio::main]
@@ -441,77 +455,34 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_xml, resolve_gmp_password_with, resolve_ssh_password_with, Cli, PasswordResolution,
-        Transport, GMP_PROFILE,
+        format_xml, resolve_required_gmp_password_with, resolve_ssh_password_with, socket_timeout,
+        Cli, PasswordResolution, RequiredPasswordResolution, Transport, GMP_PROFILE,
     };
     use clap::Parser;
     use gvm_gmp::commands::authentication::AuthenticateRequest;
     use gvm_gmp::GmpRequestCodec;
-
-    fn socket_transport() -> Transport {
-        Transport::Socket {
-            path: "/tmp/gvmd.sock".into(),
-            timeout: 60,
-        }
-    }
+    use std::time::Duration;
 
     #[test]
-    fn returns_password_without_prompt_when_username_not_set() {
-        let cli = Cli {
-            gmp_username: None,
-            gmp_password: Some("secret".to_string()),
-            xml: None,
-            raw: false,
-            pretty: false,
-            duration: false,
-            verbose: false,
-            infile: None,
-            transport: socket_transport(),
-        };
+    fn uses_provided_gmp_password_without_prompting() {
+        let result = resolve_required_gmp_password_with(Some("secret".to_string()), false).unwrap();
 
-        let result =
-            resolve_gmp_password_with(cli.gmp_username.as_deref(), cli.gmp_password, false)
-                .unwrap();
-
-        assert_eq!(result, PasswordResolution::Provided("secret".to_string()));
+        assert_eq!(
+            result,
+            RequiredPasswordResolution::Provided("secret".to_string())
+        );
     }
 
     #[test]
     fn prompts_for_password_when_username_is_set_and_stdin_is_tty() {
-        let cli = Cli {
-            gmp_username: Some("admin".to_string()),
-            gmp_password: None,
-            xml: None,
-            raw: false,
-            pretty: false,
-            duration: false,
-            verbose: false,
-            infile: None,
-            transport: socket_transport(),
-        };
+        let result = resolve_required_gmp_password_with(None, true).unwrap();
 
-        let result =
-            resolve_gmp_password_with(cli.gmp_username.as_deref(), cli.gmp_password, true).unwrap();
-
-        assert_eq!(result, PasswordResolution::Prompt("GMP Password: "));
+        assert_eq!(result, RequiredPasswordResolution::Prompt("GMP Password: "));
     }
 
     #[test]
     fn returns_error_when_username_is_set_without_password_and_stdin_is_not_tty() {
-        let cli = Cli {
-            gmp_username: Some("admin".to_string()),
-            gmp_password: None,
-            xml: None,
-            raw: false,
-            pretty: false,
-            duration: false,
-            verbose: false,
-            infile: None,
-            transport: socket_transport(),
-        };
-
-        let error = resolve_gmp_password_with(cli.gmp_username.as_deref(), cli.gmp_password, false)
-            .unwrap_err();
+        let error = resolve_required_gmp_password_with(None, false).unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -575,14 +546,43 @@ mod tests {
     #[test]
     fn pretty_prints_xml_with_indentation() {
         let formatted = format_xml(b"<root><child>value</child></root>", true).unwrap();
-        assert!(formatted.contains("\n  <child>value</child>\n"));
+        assert!(String::from_utf8(formatted)
+            .unwrap()
+            .contains("\n  <child>value</child>\n"));
     }
 
     #[test]
     fn returns_original_xml_when_not_pretty() {
         let original = "<root><child>value</child></root>";
         let formatted = format_xml(original.as_bytes(), false).unwrap();
-        assert_eq!(formatted, original);
+        assert_eq!(formatted, original.as_bytes());
+    }
+
+    #[test]
+    fn returns_original_bytes_when_not_pretty() {
+        let original = [0xff, 0xfe, 0xfd];
+        assert_eq!(format_xml(&original, false).unwrap(), original);
+    }
+
+    #[test]
+    fn rejects_malformed_xml_when_pretty_printing() {
+        let error = format_xml(b"<root></child>", true).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to pretty-print XML response"),
+            "error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn timeout_minus_one_disables_socket_timeout() {
+        assert_eq!(socket_timeout(-1), None);
+    }
+
+    #[test]
+    fn timeout_zero_is_immediate() {
+        assert_eq!(socket_timeout(0), Some(Duration::ZERO));
     }
 
     #[test]
